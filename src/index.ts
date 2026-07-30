@@ -1,8 +1,10 @@
 import * as core from "@actions/core"
 import { mkdir, readdir, writeFile } from "fs/promises"
 import { ConfigSchema } from "./schema"
+import { filterCloudflareHostnames } from "./cloudflare-nameservers"
 import {
   appTemplate,
+  HostnameMiddlewareOptions,
   hydrateGeneratedConfig,
   hydratePackageJson,
   hydrateWranglerTemplate,
@@ -48,6 +50,7 @@ export async function main() {
 
   const maybeConfig = await ConfigSchema.safeParseAsync({
     debug: core.getInput("debug"),
+    hostnames: core.getInput("hostnames"),
     cloudflareAccountId: core.getInput("cloudflare-account-id"),
     appwardenApiToken: core.getInput("appwarden-api-token"),
   })
@@ -62,7 +65,7 @@ export async function main() {
 
   const middlewareDir = ".appwarden/generated-middleware"
 
-  debug(`[middleware-config] Fetching middleware configuration`)
+  debug(`[config] Fetching middleware configuration`)
 
   // Fetch middleware options for all hostnames from API
   let middlewareOptionsMap
@@ -92,8 +95,40 @@ export async function main() {
     )
   }
 
+  // If hostnames input is provided, filter the fetched configurations to only those hostnames
+  if (config.hostnames) {
+    debug(`[config] Filtering configurations to requested hostnames`)
+
+    const filteredMap = new Map<string, HostnameMiddlewareOptions>()
+    const requestedHostnames = config.hostnames
+    const availableHostnames = Array.from(middlewareOptionsMap.keys())
+
+    for (const hostname of requestedHostnames) {
+      if (middlewareOptionsMap.has(hostname)) {
+        filteredMap.set(hostname, middlewareOptionsMap.get(hostname)!)
+      }
+    }
+
+    const missingHostnames = requestedHostnames.filter(
+      (h) => !availableHostnames.includes(h),
+    )
+    if (missingHostnames.length > 0) {
+      core.warning(
+        `Ignoring ${missingHostnames.length} requested hostname(s) not found in your domain configuration: ${missingHostnames.join(", ")}`,
+      )
+    }
+
+    if (filteredMap.size === 0) {
+      return core.setFailed(
+        `None of the requested hostnames were found in your Appwarden domain configuration: ${requestedHostnames.join(", ")}`,
+      )
+    }
+
+    middlewareOptionsMap = filteredMap
+  }
+
   debug(
-    `[middleware-config] ✅ Fetch complete for ${middlewareOptionsMap.size} hostname(s)\n ${JSON.stringify(
+    `[config] ✅ Fetch complete for ${middlewareOptionsMap.size} hostname(s)\n ${JSON.stringify(
       Object.fromEntries(middlewareOptionsMap),
       null,
       2,
@@ -103,10 +138,32 @@ export async function main() {
   debug(`[generation] Generating middleware files`)
 
   // Generate the config and extract hostnames
-  const { configString, hostnames } =
-    hydrateGeneratedConfig(middlewareOptionsMap)
+  const {
+    configString,
+    hostnames,
+    debug: debugEnabled,
+  } = hydrateGeneratedConfig(middlewareOptionsMap)
 
   debug(`[generation] Extracted hostnames: ${hostnames.join(", ")}`)
+
+  // Filter hostnames to only include those using Cloudflare nameservers
+  const cloudflareHostnames = await filterCloudflareHostnames(hostnames)
+
+  if (cloudflareHostnames.length < hostnames.length) {
+    const filtered = hostnames.filter((h) => !cloudflareHostnames.includes(h))
+    core.warning(
+      `Ignoring ${filtered.length} non-Cloudflare domain(s) in your domain configuration: ${filtered.join(", ")}`,
+    )
+  }
+
+  if (cloudflareHostnames.length === 0) {
+    return core.setFailed(
+      `No hostnames are using Cloudflare nameservers. Please ensure your domains are configured to use Cloudflare nameservers.`,
+    )
+  }
+
+  debug(`[generation] Cloudflare hostnames: ${cloudflareHostnames.join(", ")}`)
+  debug(`[generation] Debug mode: ${debugEnabled}`)
 
   // write the app files
   await mkdir(middlewareDir, { recursive: true })
@@ -120,7 +177,7 @@ export async function main() {
       "wrangler.toml",
       hydrateWranglerTemplate(wranglerFileTemplate, {
         cloudflareAccountId: config.cloudflareAccountId,
-        hostnames,
+        hostnames: cloudflareHostnames,
       }),
     ],
     ["app.mjs", appTemplate],
@@ -136,7 +193,7 @@ export async function main() {
 
   // Set outputs for downstream steps
   core.setOutput("middlewareVersion", middlewareVersion)
-  core.setOutput("hostnames", hostnames.join(", "))
+  core.setOutput("hostnames", cloudflareHostnames.join(", "))
 }
 
 main().catch((err) => {

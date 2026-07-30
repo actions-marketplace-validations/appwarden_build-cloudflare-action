@@ -43,20 +43,6 @@ describe("wrangler-toml", () => {
           'APPWARDEN_API_HOSTNAME = "https://staging-api.appwarden.io"',
         )
       })
-
-      it("should include production APPWARDEN_API_HOSTNAME", () => {
-        const config: WranglerTemplateConfig = {
-          hostnames: ["app.example.com"],
-          cloudflareAccountId: "1234567890abcdef1234567890abcdef",
-        }
-
-        const result = hydrateWranglerTemplate(wranglerFileTemplate, config)
-
-        expect(result).toContain("[env.production.vars]")
-        expect(result).toContain(
-          'APPWARDEN_API_HOSTNAME = "https://api.appwarden.io"',
-        )
-      })
     })
 
     describe("security: input sanitization", () => {

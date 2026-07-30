@@ -158,18 +158,18 @@ var require_tunnel = __commonJS({
             res.statusCode
           );
           socket.destroy();
-          var error49 = new Error("tunneling socket could not be established, statusCode=" + res.statusCode);
-          error49.code = "ECONNRESET";
-          options2.request.emit("error", error49);
+          var error52 = new Error("tunneling socket could not be established, statusCode=" + res.statusCode);
+          error52.code = "ECONNRESET";
+          options2.request.emit("error", error52);
           self.removeSocket(placeholder);
           return;
         }
         if (head.length > 0) {
           debug3("got illegal response body from proxy");
           socket.destroy();
-          var error49 = new Error("got illegal response body from proxy");
-          error49.code = "ECONNRESET";
-          options2.request.emit("error", error49);
+          var error52 = new Error("got illegal response body from proxy");
+          error52.code = "ECONNRESET";
+          options2.request.emit("error", error52);
           self.removeSocket(placeholder);
           return;
         }
@@ -184,9 +184,9 @@ var require_tunnel = __commonJS({
           cause.message,
           cause.stack
         );
-        var error49 = new Error("tunneling socket could not be established, cause=" + cause.message);
-        error49.code = "ECONNRESET";
-        options2.request.emit("error", error49);
+        var error52 = new Error("tunneling socket could not be established, cause=" + cause.message);
+        error52.code = "ECONNRESET";
+        options2.request.emit("error", error52);
         self.removeSocket(placeholder);
       }
     };
@@ -656,6 +656,21 @@ var require_errors = __commonJS({
       }
       [kSecureProxyConnectionError] = true;
     };
+    var kMessageSizeExceededError = /* @__PURE__ */ Symbol.for("undici.error.UND_ERR_WS_MESSAGE_SIZE_EXCEEDED");
+    var MessageSizeExceededError = class extends UndiciError {
+      constructor(message) {
+        super(message);
+        this.name = "MessageSizeExceededError";
+        this.message = message || "Max decompressed message size exceeded";
+        this.code = "UND_ERR_WS_MESSAGE_SIZE_EXCEEDED";
+      }
+      static [Symbol.hasInstance](instance) {
+        return instance && instance[kMessageSizeExceededError] === true;
+      }
+      get [kMessageSizeExceededError]() {
+        return true;
+      }
+    };
     module2.exports = {
       AbortError,
       HTTPParserError,
@@ -679,7 +694,8 @@ var require_errors = __commonJS({
       ResponseExceededMaxSizeError,
       RequestRetryError,
       ResponseError,
-      SecureProxyConnectionError
+      SecureProxyConnectionError,
+      MessageSizeExceededError
     };
   }
 });
@@ -1501,14 +1517,14 @@ var require_diagnostics = __commonJS({
       diagnosticsChannel.channel("undici:client:connectError").subscribe((evt) => {
         const {
           connectParams: { version: version2, protocol, port, host },
-          error: error49
+          error: error52
         } = evt;
         debuglog(
           "connection to %s using %s%s errored - %s",
           `${host}${port ? `:${port}` : ""}`,
           protocol,
           version2,
-          error49.message
+          error52.message
         );
       });
       diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
@@ -1539,14 +1555,14 @@ var require_diagnostics = __commonJS({
       diagnosticsChannel.channel("undici:request:error").subscribe((evt) => {
         const {
           request: { method, path, origin },
-          error: error49
+          error: error52
         } = evt;
         debuglog(
           "request to %s %s/%s errored - %s",
           method,
           origin,
           path,
-          error49.message
+          error52.message
         );
       });
       isClientSet = true;
@@ -1581,7 +1597,7 @@ var require_diagnostics = __commonJS({
         diagnosticsChannel.channel("undici:client:connectError").subscribe((evt) => {
           const {
             connectParams: { version: version2, protocol, port, host },
-            error: error49
+            error: error52
           } = evt;
           debuglog(
             "connection to %s%s using %s%s errored - %s",
@@ -1589,7 +1605,7 @@ var require_diagnostics = __commonJS({
             port ? `:${port}` : "",
             protocol,
             version2,
-            error49.message
+            error52.message
           );
         });
         diagnosticsChannel.channel("undici:client:sendHeaders").subscribe((evt) => {
@@ -1688,6 +1704,9 @@ var require_request = __commonJS({
         }
         if (upgrade && typeof upgrade !== "string") {
           throw new InvalidArgumentError("upgrade must be a string");
+        }
+        if (upgrade && !isValidHeaderValue(upgrade)) {
+          throw new InvalidArgumentError("invalid upgrade header");
         }
         if (headersTimeout != null && (!Number.isFinite(headersTimeout) || headersTimeout < 0)) {
           throw new InvalidArgumentError("invalid headersTimeout");
@@ -1856,16 +1875,16 @@ var require_request = __commonJS({
           this.onError(err);
         }
       }
-      onError(error49) {
+      onError(error52) {
         this.onFinally();
         if (channels.error.hasSubscribers) {
-          channels.error.publish({ request: this, error: error49 });
+          channels.error.publish({ request: this, error: error52 });
         }
         if (this.aborted) {
           return;
         }
         this.aborted = true;
-        return this[kHandler].onError(error49);
+        return this[kHandler].onError(error52);
       }
       onFinally() {
         if (this.errorHandler) {
@@ -1921,12 +1940,18 @@ var require_request = __commonJS({
       } else {
         val = `${val}`;
       }
-      if (request.host === null && headerName === "host") {
+      if (headerName === "host") {
+        if (request.host !== null) {
+          throw new InvalidArgumentError("duplicate host header");
+        }
         if (typeof val !== "string") {
           throw new InvalidArgumentError("invalid host header");
         }
         request.host = val;
-      } else if (request.contentLength === null && headerName === "content-length") {
+      } else if (headerName === "content-length") {
+        if (request.contentLength !== null) {
+          throw new InvalidArgumentError("duplicate content-length header");
+        }
         request.contentLength = parseInt(val, 10);
         if (!Number.isFinite(request.contentLength)) {
           throw new InvalidArgumentError("invalid content-length header");
@@ -2023,13 +2048,21 @@ var require_dispatcher_base = __commonJS({
     var kOnDestroyed = /* @__PURE__ */ Symbol("onDestroyed");
     var kOnClosed = /* @__PURE__ */ Symbol("onClosed");
     var kInterceptedDispatch = /* @__PURE__ */ Symbol("Intercepted Dispatch");
+    var kWebSocketOptions = /* @__PURE__ */ Symbol("webSocketOptions");
     var DispatcherBase = class extends Dispatcher {
-      constructor() {
+      constructor(opts) {
         super();
         this[kDestroyed] = false;
         this[kOnDestroyed] = null;
         this[kClosed] = false;
         this[kOnClosed] = [];
+        this[kWebSocketOptions] = opts?.webSocket ?? {};
+      }
+      get webSocketOptions() {
+        return {
+          maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+          maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
+        };
       }
       get destroyed() {
         return this[kDestroyed];
@@ -5582,7 +5615,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r
       }
       throwIfAborted(object2[kState]);
       const promise2 = createDeferredPromise();
-      const errorSteps = (error49) => promise2.reject(error49);
+      const errorSteps = (error52) => promise2.reject(error52);
       const successSteps = (data) => {
         try {
           promise2.resolve(convertBytesToJSValue(data));
@@ -5682,6 +5715,9 @@ var require_client_h1 = __commonJS({
     var FastBuffer = Buffer[Symbol.species];
     var addListener = util.addListener;
     var removeAllListeners = util.removeAllListeners;
+    var kIdleSocketValidation = /* @__PURE__ */ Symbol("kIdleSocketValidation");
+    var kIdleSocketValidationTimeout = /* @__PURE__ */ Symbol("kIdleSocketValidationTimeout");
+    var kSocketUsed = /* @__PURE__ */ Symbol("kSocketUsed");
     var extractBody;
     async function lazyllhttp() {
       const llhttpWasmData = process.env.JEST_WORKER_ID ? require_llhttp_wasm() : void 0;
@@ -5844,23 +5880,54 @@ var require_client_h1 = __commonJS({
             currentBufferRef = null;
           }
           const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
-          if (ret === constants3.ERROR.PAUSED_UPGRADE) {
-            this.onUpgrade(data.slice(offset));
-          } else if (ret === constants3.ERROR.PAUSED) {
-            this.paused = true;
-            socket.unshift(data.slice(offset));
-          } else if (ret !== constants3.ERROR.OK) {
-            const ptr = llhttp.llhttp_get_error_reason(this.ptr);
-            let message = "";
-            if (ptr) {
-              const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
-              message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
+          if (ret !== constants3.ERROR.OK) {
+            const body = data.subarray(offset);
+            if (ret === constants3.ERROR.PAUSED_UPGRADE) {
+              this.onUpgrade(body);
+            } else if (ret === constants3.ERROR.PAUSED) {
+              this.paused = true;
+              socket.unshift(body);
+            } else {
+              throw this.createError(ret, body);
             }
-            throw new HTTPParserError(message, constants3.ERROR[ret], data.slice(offset));
           }
         } catch (err) {
           util.destroy(socket, err);
         }
+      }
+      finish() {
+        assert2(currentParser === null);
+        assert2(this.ptr != null);
+        assert2(!this.paused);
+        const { llhttp } = this;
+        let ret;
+        try {
+          currentParser = this;
+          ret = llhttp.llhttp_finish(this.ptr);
+        } finally {
+          currentParser = null;
+        }
+        if (ret === constants3.ERROR.OK) {
+          return null;
+        }
+        if (ret === constants3.ERROR.PAUSED || ret === constants3.ERROR.PAUSED_UPGRADE) {
+          this.paused = true;
+          return null;
+        }
+        return this.createError(ret, EMPTY_BUF);
+      }
+      createError(ret, data) {
+        const { llhttp, contentLength, bytesRead } = this;
+        if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+          return new ResponseContentLengthMismatchError();
+        }
+        const ptr = llhttp.llhttp_get_error_reason(this.ptr);
+        let message = "";
+        if (ptr) {
+          const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
+          message = "Response does not match the HTTP/1.1 protocol (" + Buffer.from(llhttp.memory.buffer, ptr, len).toString() + ")";
+        }
+        return new HTTPParserError(message, constants3.ERROR[ret], data);
       }
       destroy() {
         assert2(this.ptr != null);
@@ -5879,6 +5946,10 @@ var require_client_h1 = __commonJS({
       onMessageBegin() {
         const { socket, client } = this;
         if (socket.destroyed) {
+          return -1;
+        }
+        if (client[kRunning] === 0) {
+          util.destroy(socket, new SocketError("bad response", util.getSocketInfo(socket)));
           return -1;
         }
         const request = client[kQueue][client[kRunningIdx]];
@@ -5958,6 +6029,10 @@ var require_client_h1 = __commonJS({
       onHeadersComplete(statusCode, upgrade, shouldKeepAlive) {
         const { client, socket, headers, statusText } = this;
         if (socket.destroyed) {
+          return -1;
+        }
+        if (client[kRunning] === 0) {
+          util.destroy(socket, new SocketError("bad response", util.getSocketInfo(socket)));
           return -1;
         }
         const request = client[kQueue][client[kRunningIdx]];
@@ -6085,6 +6160,7 @@ var require_client_h1 = __commonJS({
         }
         request.onComplete(headers);
         client[kQueue][client[kRunningIdx]++] = null;
+        socket[kSocketUsed] = true;
         if (socket[kWriting]) {
           assert2(client[kRunning] === 0);
           util.destroy(socket, new InformationalError("reset"));
@@ -6128,12 +6204,19 @@ var require_client_h1 = __commonJS({
       socket[kWriting] = false;
       socket[kReset] = false;
       socket[kBlocking] = false;
+      socket[kIdleSocketValidation] = 0;
+      socket[kIdleSocketValidationTimeout] = null;
+      socket[kSocketUsed] = false;
       socket[kParser] = new Parser(client, socket, llhttpInstance);
       addListener(socket, "error", function(err) {
         assert2(err.code !== "ERR_TLS_CERT_ALTNAME_INVALID");
         const parser = this[kParser];
         if (err.code === "ECONNRESET" && parser.statusCode && !parser.shouldKeepAlive) {
-          parser.onMessageComplete();
+          const parserErr = parser.finish();
+          if (parserErr) {
+            this[kError] = parserErr;
+            this[kClient][kOnError](parserErr);
+          }
           return;
         }
         this[kError] = err;
@@ -6148,7 +6231,10 @@ var require_client_h1 = __commonJS({
       addListener(socket, "end", function() {
         const parser = this[kParser];
         if (parser.statusCode && !parser.shouldKeepAlive) {
-          parser.onMessageComplete();
+          const parserErr = parser.finish();
+          if (parserErr) {
+            util.destroy(this, parserErr);
+          }
           return;
         }
         util.destroy(this, new SocketError("other side closed", util.getSocketInfo(this)));
@@ -6156,9 +6242,10 @@ var require_client_h1 = __commonJS({
       addListener(socket, "close", function() {
         const client2 = this[kClient];
         const parser = this[kParser];
+        clearIdleSocketValidation(this);
         if (parser) {
           if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-            parser.onMessageComplete();
+            this[kError] = parser.finish() || this[kError];
           }
           this[kParser].destroy();
           this[kParser] = null;
@@ -6207,7 +6294,7 @@ var require_client_h1 = __commonJS({
           return socket.destroyed;
         },
         busy(request) {
-          if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+          if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
             return true;
           }
           if (request) {
@@ -6225,6 +6312,24 @@ var require_client_h1 = __commonJS({
         }
       };
     }
+    function clearIdleSocketValidation(socket) {
+      if (socket[kIdleSocketValidationTimeout]) {
+        clearTimeout(socket[kIdleSocketValidationTimeout]);
+        socket[kIdleSocketValidationTimeout] = null;
+      }
+      socket[kIdleSocketValidation] = 0;
+    }
+    function scheduleIdleSocketValidation(client, socket) {
+      socket[kIdleSocketValidation] = 1;
+      socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+        socket[kIdleSocketValidationTimeout] = null;
+        socket[kIdleSocketValidation] = 2;
+        if (client[kSocket] === socket && !socket.destroyed) {
+          client[kResume]();
+        }
+      }, 0);
+      socket[kIdleSocketValidationTimeout].unref?.();
+    }
     function resumeH1(client) {
       const socket = client[kSocket];
       if (socket && !socket.destroyed) {
@@ -6236,6 +6341,29 @@ var require_client_h1 = __commonJS({
         } else if (socket[kNoRef] && socket.ref) {
           socket.ref();
           socket[kNoRef] = false;
+        }
+        if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+          if (socket[kIdleSocketValidation] === 0) {
+            scheduleIdleSocketValidation(client, socket);
+            socket[kParser].readMore();
+            if (socket.destroyed) {
+              return;
+            }
+            return;
+          }
+          if (socket[kIdleSocketValidation] === 1) {
+            socket[kParser].readMore();
+            if (socket.destroyed) {
+              return;
+            }
+            return;
+          }
+        }
+        if (client[kRunning] === 0) {
+          socket[kParser].readMore();
+          if (socket.destroyed) {
+            return;
+          }
         }
         if (client[kSize] === 0) {
           if (socket[kParser].timeoutType !== TIMEOUT_KEEP_ALIVE) {
@@ -6289,6 +6417,7 @@ var require_client_h1 = __commonJS({
         process.emitWarning(new RequestContentLengthMismatchError());
       }
       const socket = client[kSocket];
+      clearIdleSocketValidation(socket);
       const abort = (err) => {
         if (request.aborted || request.completed) {
           return;
@@ -7090,8 +7219,8 @@ var require_client_h2 = __commonJS({
         }
         request.onRequestSent();
         client[kResume]();
-      } catch (error49) {
-        abort(error49);
+      } catch (error52) {
+        abort(error52);
       }
     }
     function writeStream(abort, socket, expectsPayload, h2stream, body, client, request, contentLength) {
@@ -7246,8 +7375,8 @@ var require_redirect_handler = __commonJS({
       onUpgrade(statusCode, headers, socket) {
         this.handler.onUpgrade(statusCode, headers, socket);
       }
-      onError(error49) {
-        this.handler.onError(error49);
+      onError(error52) {
+        this.handler.onError(error52);
       }
       onHeaders(statusCode, headers, resume, statusText) {
         this.location = this.history.length >= this.maxRedirections || util.isDisturbed(this.opts.body) ? null : parseLocation(statusCode, headers);
@@ -7468,9 +7597,10 @@ var require_client = __commonJS({
         autoSelectFamilyAttemptTimeout,
         // h2
         maxConcurrentStreams,
-        allowH2
+        allowH2,
+        webSocket
       } = {}) {
-        super();
+        super({ webSocket });
         if (keepAlive !== void 0) {
           throw new InvalidArgumentError("unsupported keepAlive, use pipelining=0 instead");
         }
@@ -7977,8 +8107,8 @@ var require_pool_base = __commonJS({
     var kRemoveClient = /* @__PURE__ */ Symbol("remove client");
     var kStats = /* @__PURE__ */ Symbol("stats");
     var PoolBase = class extends DispatcherBase {
-      constructor() {
-        super();
+      constructor(opts) {
+        super(opts);
         this[kQueue] = new FixedQueue();
         this[kClients] = [];
         this[kQueued] = 0;
@@ -8149,7 +8279,6 @@ var require_pool = __commonJS({
         allowH2,
         ...options2
       } = {}) {
-        super();
         if (connections != null && (!Number.isFinite(connections) || connections < 0)) {
           throw new InvalidArgumentError("invalid connections");
         }
@@ -8170,13 +8299,14 @@ var require_pool = __commonJS({
             ...connect
           });
         }
+        super(options2);
         this[kInterceptors] = options2.interceptors?.Pool && Array.isArray(options2.interceptors.Pool) ? options2.interceptors.Pool : [];
         this[kConnections] = connections || null;
         this[kUrl] = util.parseOrigin(origin);
         this[kOptions] = { ...util.deepClone(options2), connect, allowH2 };
         this[kOptions].interceptors = options2.interceptors ? { ...options2.interceptors } : void 0;
         this[kFactory] = factory;
-        this.on("connectionError", (origin2, targets, error49) => {
+        this.on("connectionError", (origin2, targets, error52) => {
           for (const target of targets) {
             const idx = this[kClients].indexOf(target);
             if (idx !== -1) {
@@ -8369,7 +8499,6 @@ var require_agent = __commonJS({
     }
     var Agent = class extends DispatcherBase {
       constructor({ factory = defaultFactory, maxRedirections = 0, connect, ...options2 } = {}) {
-        super();
         if (typeof factory !== "function") {
           throw new InvalidArgumentError("factory must be a function.");
         }
@@ -8379,6 +8508,7 @@ var require_agent = __commonJS({
         if (!Number.isInteger(maxRedirections) || maxRedirections < 0) {
           throw new InvalidArgumentError("maxRedirections must be a positive number");
         }
+        super(options2);
         if (connect && typeof connect !== "function") {
           connect = { ...connect };
         }
@@ -10545,13 +10675,13 @@ var require_mock_utils = __commonJS({
       if (mockDispatch2.data.callback) {
         mockDispatch2.data = { ...mockDispatch2.data, ...mockDispatch2.data.callback(opts) };
       }
-      const { data: { statusCode, data, headers, trailers, error: error49 }, delay, persist } = mockDispatch2;
+      const { data: { statusCode, data, headers, trailers, error: error52 }, delay, persist } = mockDispatch2;
       const { timesInvoked, times } = mockDispatch2;
       mockDispatch2.consumed = !persist && timesInvoked >= times;
       mockDispatch2.pending = timesInvoked < times;
-      if (error49 !== null) {
+      if (error52 !== null) {
         deleteMockDispatch(this[kDispatches], key);
-        handler.onError(error49);
+        handler.onError(error52);
         return true;
       }
       if (typeof delay === "number" && delay > 0) {
@@ -10589,19 +10719,19 @@ var require_mock_utils = __commonJS({
         if (agent.isMockActive) {
           try {
             mockDispatch.call(this, opts, handler);
-          } catch (error49) {
-            if (error49 instanceof MockNotMatchedError) {
+          } catch (error52) {
+            if (error52 instanceof MockNotMatchedError) {
               const netConnect = agent[kGetNetConnect]();
               if (netConnect === false) {
-                throw new MockNotMatchedError(`${error49.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`);
+                throw new MockNotMatchedError(`${error52.message}: subsequent request to origin ${origin} was not allowed (net.connect disabled)`);
               }
               if (checkNetConnect(netConnect, origin)) {
                 originalDispatch.call(this, opts, handler);
               } else {
-                throw new MockNotMatchedError(`${error49.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`);
+                throw new MockNotMatchedError(`${error52.message}: subsequent request to origin ${origin} was not allowed (net.connect is not enabled for this origin)`);
               }
             } else {
-              throw error49;
+              throw error52;
             }
           }
         } else {
@@ -10766,11 +10896,11 @@ var require_mock_interceptor = __commonJS({
       /**
        * Mock an undici request with a defined error.
        */
-      replyWithError(error49) {
-        if (typeof error49 === "undefined") {
+      replyWithError(error52) {
+        if (typeof error52 === "undefined") {
           throw new InvalidArgumentError("error must be defined");
         }
-        const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], { error: error49 });
+        const newMockDispatch = addMockDispatch(this[kDispatches], this[kDispatchKey], { error: error52 });
         return new MockScope(newMockDispatch);
       }
       /**
@@ -13288,17 +13418,17 @@ var require_fetch = __commonJS({
         this.emit("terminated", reason);
       }
       // https://fetch.spec.whatwg.org/#fetch-controller-abort
-      abort(error49) {
+      abort(error52) {
         if (this.state !== "ongoing") {
           return;
         }
         this.state = "aborted";
-        if (!error49) {
-          error49 = new DOMException("The operation was aborted.", "AbortError");
+        if (!error52) {
+          error52 = new DOMException("The operation was aborted.", "AbortError");
         }
-        this.serializedAbortReason = error49;
-        this.connection?.destroy(error49);
-        this.emit("terminated", error49);
+        this.serializedAbortReason = error52;
+        this.connection?.destroy(error52);
+        this.emit("terminated", error52);
       }
     };
     function handleFetchDone(response) {
@@ -13394,12 +13524,12 @@ var require_fetch = __commonJS({
       );
     }
     var markResourceTiming = performance.markResourceTiming;
-    function abortFetch(p, request, responseObject, error49) {
+    function abortFetch(p, request, responseObject, error52) {
       if (p) {
-        p.reject(error49);
+        p.reject(error52);
       }
       if (request.body != null && isReadable(request.body?.stream)) {
-        request.body.stream.cancel(error49).catch((err) => {
+        request.body.stream.cancel(error52).catch((err) => {
           if (err.code === "ERR_INVALID_STATE") {
             return;
           }
@@ -13411,7 +13541,7 @@ var require_fetch = __commonJS({
       }
       const response = responseObject[kState];
       if (response.body != null && isReadable(response.body?.stream)) {
-        response.body.stream.cancel(error49).catch((err) => {
+        response.body.stream.cancel(error52).catch((err) => {
           if (err.code === "ERR_INVALID_STATE") {
             return;
           }
@@ -14232,13 +14362,13 @@ var require_fetch = __commonJS({
               fetchParams.controller.ended = true;
               this.body.push(null);
             },
-            onError(error49) {
+            onError(error52) {
               if (this.abort) {
                 fetchParams.controller.off("terminated", this.abort);
               }
-              this.body?.destroy(error49);
-              fetchParams.controller.terminate(error49);
-              reject(error49);
+              this.body?.destroy(error52);
+              fetchParams.controller.terminate(error52);
+              reject(error52);
             },
             onUpgrade(status, rawHeaders, socket) {
               if (status !== 101) {
@@ -14701,8 +14831,8 @@ var require_util4 = __commonJS({
                   }
                   fr[kResult] = result;
                   fireAProgressEvent("load", fr);
-                } catch (error49) {
-                  fr[kError] = error49;
+                } catch (error52) {
+                  fr[kError] = error52;
                   fireAProgressEvent("error", fr);
                 }
                 if (fr[kState] !== "loading") {
@@ -14711,13 +14841,13 @@ var require_util4 = __commonJS({
               });
               break;
             }
-          } catch (error49) {
+          } catch (error52) {
             if (fr[kAborted]) {
               return;
             }
             queueMicrotask(() => {
               fr[kState] = "done";
-              fr[kError] = error49;
+              fr[kError] = error52;
               fireAProgressEvent("error", fr);
               if (fr[kState] !== "loading") {
                 fireAProgressEvent("loadend", fr);
@@ -16075,18 +16205,14 @@ var require_parse = __commonJS({
       } else if (attributeNameLowercase === "httponly") {
         cookieAttributeList.httpOnly = true;
       } else if (attributeNameLowercase === "samesite") {
-        let enforcement = "Default";
         const attributeValueLowercase = attributeValue.toLowerCase();
-        if (attributeValueLowercase.includes("none")) {
-          enforcement = "None";
+        if (attributeValueLowercase === "none") {
+          cookieAttributeList.sameSite = "None";
+        } else if (attributeValueLowercase === "strict") {
+          cookieAttributeList.sameSite = "Strict";
+        } else if (attributeValueLowercase === "lax") {
+          cookieAttributeList.sameSite = "Lax";
         }
-        if (attributeValueLowercase.includes("strict")) {
-          enforcement = "Strict";
-        }
-        if (attributeValueLowercase.includes("lax")) {
-          enforcement = "Lax";
-        }
-        cookieAttributeList.sameSite = enforcement;
       } else {
         cookieAttributeList.unparsed ??= [];
         cookieAttributeList.unparsed.push(`${attributeName}=${attributeValue}`);
@@ -16701,13 +16827,17 @@ var require_util7 = __commonJS({
       return extensionList;
     }
     function isValidClientWindowBits(value) {
+      if (value.length === 0) {
+        return false;
+      }
       for (let i = 0; i < value.length; i++) {
         const byte = value.charCodeAt(i);
         if (byte < 48 || byte > 57) {
           return false;
         }
       }
-      return true;
+      const num = Number.parseInt(value, 10);
+      return num >= 8 && num <= 15;
     }
     var hasIntl = typeof process.versions.icu === "string";
     var fatalDecoder = hasIntl ? new TextDecoder("utf-8", { fatal: true }) : void 0;
@@ -16985,11 +17115,11 @@ var require_connection = __commonJS({
         });
       }
     }
-    function onSocketError(error49) {
+    function onSocketError(error52) {
       const { ws } = this;
       ws[kReadyState] = states.CLOSING;
       if (channels.socketError.hasSubscribers) {
-        channels.socketError.publish(error49);
+        channels.socketError.publish(error52);
       }
       this.destroy();
     }
@@ -17006,6 +17136,7 @@ var require_permessage_deflate = __commonJS({
     "use strict";
     var { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require("zlib");
     var { isValidClientWindowBits } = require_util7();
+    var { MessageSizeExceededError } = require_errors();
     var tail = Buffer.from([0, 0, 255, 255]);
     var kBuffer = /* @__PURE__ */ Symbol("kBuffer");
     var kLength = /* @__PURE__ */ Symbol("kLength");
@@ -17013,10 +17144,21 @@ var require_permessage_deflate = __commonJS({
       /** @type {import('node:zlib').InflateRaw} */
       #inflate;
       #options = {};
-      constructor(extensions) {
+      #maxPayloadSize = 0;
+      /**
+       * @param {Map<string, string>} extensions
+       */
+      constructor(extensions, options2) {
         this.#options.serverNoContextTakeover = extensions.has("server_no_context_takeover");
         this.#options.serverMaxWindowBits = extensions.get("server_max_window_bits");
+        this.#maxPayloadSize = options2.maxPayloadSize;
       }
+      /**
+       * Decompress a compressed payload.
+       * @param {Buffer} chunk Compressed data
+       * @param {boolean} fin Final fragment flag
+       * @param {Function} callback Callback function
+       */
       decompress(chunk, fin, callback) {
         if (!this.#inflate) {
           let windowBits = Z_DEFAULT_WINDOWBITS;
@@ -17027,12 +17169,23 @@ var require_permessage_deflate = __commonJS({
             }
             windowBits = Number.parseInt(this.#options.serverMaxWindowBits);
           }
-          this.#inflate = createInflateRaw({ windowBits });
+          try {
+            this.#inflate = createInflateRaw({ windowBits });
+          } catch (err) {
+            callback(err);
+            return;
+          }
           this.#inflate[kBuffer] = [];
           this.#inflate[kLength] = 0;
           this.#inflate.on("data", (data) => {
-            this.#inflate[kBuffer].push(data);
             this.#inflate[kLength] += data.length;
+            if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
+              callback(new MessageSizeExceededError());
+              this.#inflate.removeAllListeners();
+              this.#inflate = null;
+              return;
+            }
+            this.#inflate[kBuffer].push(data);
           });
           this.#inflate.on("error", (err) => {
             this.#inflate = null;
@@ -17044,6 +17197,9 @@ var require_permessage_deflate = __commonJS({
           this.#inflate.write(tail);
         }
         this.#inflate.flush(() => {
+          if (!this.#inflate) {
+            return;
+          }
           const full = Buffer.concat(this.#inflate[kBuffer], this.#inflate[kLength]);
           this.#inflate[kBuffer].length = 0;
           this.#inflate[kLength] = 0;
@@ -17077,8 +17233,14 @@ var require_receiver = __commonJS({
     var { WebsocketFrameSend } = require_frame();
     var { closeWebSocketConnection } = require_connection();
     var { PerMessageDeflate } = require_permessage_deflate();
+    var { MessageSizeExceededError } = require_errors();
+    function failWebsocketConnectionWithCode(ws, code, reason) {
+      closeWebSocketConnection(ws, code, reason, Buffer.byteLength(reason));
+      failWebsocketConnection(ws, reason);
+    }
     var ByteParser = class extends Writable {
       #buffers = [];
+      #fragmentsBytes = 0;
       #byteOffset = 0;
       #loop = false;
       #state = parserStates.INFO;
@@ -17086,12 +17248,23 @@ var require_receiver = __commonJS({
       #fragments = [];
       /** @type {Map<string, PerMessageDeflate>} */
       #extensions;
-      constructor(ws, extensions) {
+      /** @type {number} */
+      #maxFragments;
+      /** @type {number} */
+      #maxPayloadSize;
+      /**
+       * @param {import('./websocket').WebSocket} ws
+       * @param {Map<string, string>|null} extensions
+       * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
+       */
+      constructor(ws, extensions, options2 = {}) {
         super();
         this.ws = ws;
         this.#extensions = extensions == null ? /* @__PURE__ */ new Map() : extensions;
+        this.#maxFragments = options2.maxFragments ?? 0;
+        this.#maxPayloadSize = options2.maxPayloadSize ?? 0;
         if (this.#extensions.has("permessage-deflate")) {
-          this.#extensions.set("permessage-deflate", new PerMessageDeflate(extensions));
+          this.#extensions.set("permessage-deflate", new PerMessageDeflate(extensions, options2));
         }
       }
       /**
@@ -17103,6 +17276,13 @@ var require_receiver = __commonJS({
         this.#byteOffset += chunk.length;
         this.#loop = true;
         this.run(callback);
+      }
+      #validatePayloadLength() {
+        if (this.#maxPayloadSize > 0 && !isControlFrame(this.#info.opcode) && this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize) {
+          failWebsocketConnectionWithCode(this.ws, 1009, "Payload size exceeds maximum allowed size");
+          return false;
+        }
+        return true;
       }
       /**
        * Runs whenever a new chunk is received.
@@ -17163,6 +17343,9 @@ var require_receiver = __commonJS({
             if (payloadLength <= 125) {
               this.#info.payloadLength = payloadLength;
               this.#state = parserStates.READ_DATA;
+              if (!this.#validatePayloadLength()) {
+                return;
+              }
             } else if (payloadLength === 126) {
               this.#state = parserStates.PAYLOADLENGTH_16;
             } else if (payloadLength === 127) {
@@ -17183,19 +17366,25 @@ var require_receiver = __commonJS({
             const buffer = this.consume(2);
             this.#info.payloadLength = buffer.readUInt16BE(0);
             this.#state = parserStates.READ_DATA;
+            if (!this.#validatePayloadLength()) {
+              return;
+            }
           } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
             if (this.#byteOffset < 8) {
               return callback();
             }
             const buffer = this.consume(8);
             const upper = buffer.readUInt32BE(0);
-            if (upper > 2 ** 31 - 1) {
+            const lower = buffer.readUInt32BE(4);
+            if (upper !== 0 || lower > 2 ** 31 - 1) {
               failWebsocketConnection(this.ws, "Received payload length > 2^31 bytes.");
               return;
             }
-            const lower = buffer.readUInt32BE(4);
-            this.#info.payloadLength = (upper << 8) + lower;
+            this.#info.payloadLength = lower;
             this.#state = parserStates.READ_DATA;
+            if (!this.#validatePayloadLength()) {
+              return;
+            }
           } else if (this.#state === parserStates.READ_DATA) {
             if (this.#byteOffset < this.#info.payloadLength) {
               return callback();
@@ -17206,32 +17395,46 @@ var require_receiver = __commonJS({
               this.#state = parserStates.INFO;
             } else {
               if (!this.#info.compressed) {
-                this.#fragments.push(body);
+                if (!this.writeFragments(body)) {
+                  return;
+                }
+                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+                  failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
+                  return;
+                }
                 if (!this.#info.fragmented && this.#info.fin) {
-                  const fullMessage = Buffer.concat(this.#fragments);
-                  websocketMessageReceived(this.ws, this.#info.binaryType, fullMessage);
-                  this.#fragments.length = 0;
+                  websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments());
                 }
                 this.#state = parserStates.INFO;
               } else {
-                this.#extensions.get("permessage-deflate").decompress(body, this.#info.fin, (error49, data) => {
-                  if (error49) {
-                    closeWebSocketConnection(this.ws, 1007, error49.message, error49.message.length);
-                    return;
-                  }
-                  this.#fragments.push(data);
-                  if (!this.#info.fin) {
-                    this.#state = parserStates.INFO;
+                this.#extensions.get("permessage-deflate").decompress(
+                  body,
+                  this.#info.fin,
+                  (error52, data) => {
+                    if (error52) {
+                      const code = error52 instanceof MessageSizeExceededError ? 1009 : 1007;
+                      failWebsocketConnectionWithCode(this.ws, code, error52.message);
+                      return;
+                    }
+                    if (!this.writeFragments(data)) {
+                      return;
+                    }
+                    if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+                      failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
+                      return;
+                    }
+                    if (!this.#info.fin) {
+                      this.#state = parserStates.INFO;
+                      this.#loop = true;
+                      this.run(callback);
+                      return;
+                    }
+                    websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments());
                     this.#loop = true;
+                    this.#state = parserStates.INFO;
                     this.run(callback);
-                    return;
                   }
-                  websocketMessageReceived(this.ws, this.#info.binaryType, Buffer.concat(this.#fragments));
-                  this.#loop = true;
-                  this.#state = parserStates.INFO;
-                  this.#fragments.length = 0;
-                  this.run(callback);
-                });
+                );
                 this.#loop = false;
                 break;
               }
@@ -17273,6 +17476,26 @@ var require_receiver = __commonJS({
         }
         this.#byteOffset -= n;
         return buffer;
+      }
+      writeFragments(fragment) {
+        if (this.#maxFragments > 0 && this.#fragments.length === this.#maxFragments) {
+          failWebsocketConnectionWithCode(this.ws, 1008, "Too many message fragments");
+          return false;
+        }
+        this.#fragmentsBytes += fragment.length;
+        this.#fragments.push(fragment);
+        return true;
+      }
+      consumeFragments() {
+        const fragments = this.#fragments;
+        if (fragments.length === 1) {
+          this.#fragmentsBytes = 0;
+          return fragments.shift();
+        }
+        const output = Buffer.concat(fragments, this.#fragmentsBytes);
+        this.#fragments = [];
+        this.#fragmentsBytes = 0;
+        return output;
       }
       parseCloseBody(data) {
         assert2(data.length !== 1);
@@ -17711,7 +17934,13 @@ var require_websocket = __commonJS({
        */
       #onConnectionEstablished(response, parsedExtensions) {
         this[kResponse] = response;
-        const parser = new ByteParser(this, parsedExtensions);
+        const webSocketOptions = this[kController]?.dispatcher?.webSocketOptions;
+        const maxFragments = webSocketOptions?.maxFragments;
+        const maxPayloadSize = webSocketOptions?.maxPayloadSize;
+        const parser = new ByteParser(this, parsedExtensions, {
+          maxFragments,
+          maxPayloadSize
+        });
         parser.on("drain", onParserDrain);
         parser.on("error", onParserError.bind(this));
         response.socket.ws = this;
@@ -18248,8 +18477,8 @@ var require_eventsource = __commonJS({
           pipeline(
             response.body.stream,
             eventSourceStream,
-            (error49) => {
-              if (error49?.aborted === false) {
+            (error52) => {
+              if (error52?.aborted === false) {
                 this.close();
                 this.dispatchEvent(new Event("error"));
               }
@@ -18739,7 +18968,7 @@ var Summary = class {
       }
       try {
         yield access(pathFromEnv, import_fs.constants.R_OK | import_fs.constants.W_OK);
-      } catch (_a2) {
+      } catch (_a3) {
         throw new Error(`Unable to access summary file: '${pathFromEnv}'. Check if the file has correct read/write permissions.`);
       }
       this._filePath = pathFromEnv;
@@ -19017,6 +19246,9 @@ function setFailed(message) {
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+function warning(message, properties = {}) {
+  issueCommand("warning", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+}
 
 // src/index.ts
 var import_promises = require("fs/promises");
@@ -19083,6 +19315,7 @@ __export(external_exports, {
   ZodOptional: () => ZodOptional,
   ZodPipe: () => ZodPipe,
   ZodPrefault: () => ZodPrefault,
+  ZodPreprocess: () => ZodPreprocess,
   ZodPromise: () => ZodPromise,
   ZodReadonly: () => ZodReadonly,
   ZodRealError: () => ZodRealError,
@@ -19161,6 +19394,7 @@ __export(external_exports, {
   int32: () => int32,
   int64: () => int64,
   intersection: () => intersection,
+  invertCodec: () => invertCodec,
   ipv4: () => ipv42,
   ipv6: () => ipv62,
   iso: () => iso_exports,
@@ -19342,6 +19576,7 @@ __export(core_exports2, {
   $ZodOptional: () => $ZodOptional,
   $ZodPipe: () => $ZodPipe,
   $ZodPrefault: () => $ZodPrefault,
+  $ZodPreprocess: () => $ZodPreprocess,
   $ZodPromise: () => $ZodPromise,
   $ZodReadonly: () => $ZodReadonly,
   $ZodRealError: () => $ZodRealError,
@@ -19541,7 +19776,8 @@ __export(core_exports2, {
 });
 
 // node_modules/zod/v4/core/core.js
-var NEVER = Object.freeze({
+var _a;
+var NEVER = /* @__PURE__ */ Object.freeze({
   status: "aborted"
 });
 // @__NO_SIDE_EFFECTS__
@@ -19576,10 +19812,10 @@ function $constructor(name, initializer3, params) {
   }
   Object.defineProperty(Definition, "name", { value: name });
   function _(def) {
-    var _a2;
+    var _a3;
     const inst = params?.Parent ? new Definition() : this;
     init(inst, def);
-    (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
+    (_a3 = inst._zod).deferred ?? (_a3.deferred = []);
     for (const fn of inst._zod.deferred) {
       fn();
     }
@@ -19608,7 +19844,8 @@ var $ZodEncodeError = class extends Error {
     this.name = "ZodEncodeError";
   }
 };
-var globalConfig = {};
+(_a = globalThis).__zod_globalConfig ?? (_a.__zod_globalConfig = {});
+var globalConfig = globalThis.__zod_globalConfig;
 function config(newConfig) {
   if (newConfig)
     Object.assign(globalConfig, newConfig);
@@ -19641,6 +19878,7 @@ __export(util_exports, {
   defineLazy: () => defineLazy,
   esc: () => esc,
   escapeRegex: () => escapeRegex,
+  explicitlyAborted: () => explicitlyAborted,
   extend: () => extend,
   finalizeIssue: () => finalizeIssue,
   floatSafeRemainder: () => floatSafeRemainder,
@@ -19729,19 +19967,12 @@ function cleanRegex(source) {
   return source.slice(start, end);
 }
 function floatSafeRemainder(val, step) {
-  const valDecCount = (val.toString().split(".")[1] || "").length;
-  const stepString = step.toString();
-  let stepDecCount = (stepString.split(".")[1] || "").length;
-  if (stepDecCount === 0 && /\d?e-\d?/.test(stepString)) {
-    const match = stepString.match(/\d?e-(\d?)/);
-    if (match?.[1]) {
-      stepDecCount = Number.parseInt(match[1]);
-    }
-  }
-  const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
-  const valInt = Number.parseInt(val.toFixed(decCount).replace(".", ""));
-  const stepInt = Number.parseInt(step.toFixed(decCount).replace(".", ""));
-  return valInt % stepInt / 10 ** decCount;
+  const ratio = val / step;
+  const roundedRatio = Math.round(ratio);
+  const tolerance = Number.EPSILON * Math.max(Math.abs(ratio), 1);
+  if (Math.abs(ratio - roundedRatio) < tolerance)
+    return 0;
+  return ratio - roundedRatio;
 }
 var EVALUATING = /* @__PURE__ */ Symbol("evaluating");
 function defineLazy(object2, key, getter) {
@@ -19823,7 +20054,10 @@ var captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace :
 function isObject(data) {
   return typeof data === "object" && data !== null && !Array.isArray(data);
 }
-var allowsEval = cached(() => {
+var allowsEval = /* @__PURE__ */ cached(() => {
+  if (globalConfig.jitless) {
+    return false;
+  }
   if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
     return false;
   }
@@ -19856,6 +20090,10 @@ function shallowClone(o) {
     return { ...o };
   if (Array.isArray(o))
     return [...o];
+  if (o instanceof Map)
+    return new Map(o);
+  if (o instanceof Set)
+    return new Set(o);
   return o;
 }
 function numKeys(data) {
@@ -19912,7 +20150,14 @@ var getParsedType = (data) => {
   }
 };
 var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
-var primitiveTypes = /* @__PURE__ */ new Set(["string", "number", "bigint", "boolean", "symbol", "undefined"]);
+var primitiveTypes = /* @__PURE__ */ new Set([
+  "string",
+  "number",
+  "bigint",
+  "boolean",
+  "symbol",
+  "undefined"
+]);
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -20081,6 +20326,9 @@ function safeExtend(schema, shape) {
   return clone(schema, def);
 }
 function merge(a, b) {
+  if (a._zod.def.checks?.length) {
+    throw new Error(".merge() cannot be used on object schemas containing refinements. Use .safeExtend() instead.");
+  }
   const def = mergeDefs(a._zod.def, {
     get shape() {
       const _shape = { ...a._zod.def.shape, ...b._zod.def.shape };
@@ -20090,8 +20338,7 @@ function merge(a, b) {
     get catchall() {
       return b._zod.def.catchall;
     },
-    checks: []
-    // delete existing checks
+    checks: b._zod.def.checks ?? []
   });
   return clone(a, def);
 }
@@ -20174,10 +20421,20 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
+function explicitlyAborted(x, startIndex = 0) {
+  if (x.aborted === true)
+    return true;
+  for (let i = startIndex; i < x.issues.length; i++) {
+    if (x.issues[i]?.continue === false) {
+      return true;
+    }
+  }
+  return false;
+}
 function prefixIssues(path, issues) {
   return issues.map((iss) => {
-    var _a2;
-    (_a2 = iss).path ?? (_a2.path = []);
+    var _a3;
+    (_a3 = iss).path ?? (_a3.path = []);
     iss.path.unshift(path);
     return iss;
   });
@@ -20186,17 +20443,14 @@ function unwrapMessage(message) {
   return typeof message === "string" ? message : message?.message;
 }
 function finalizeIssue(iss, ctx, config2) {
-  const full = { ...iss, path: iss.path ?? [] };
-  if (!iss.message) {
-    const message = unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
-    full.message = message;
+  const message = iss.message ? iss.message : unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
+  const { inst: _inst, continue: _continue, input: _input, ...rest } = iss;
+  rest.path ?? (rest.path = []);
+  rest.message = message;
+  if (ctx?.reportInput) {
+    rest.input = _input;
   }
-  delete full.inst;
-  delete full.continue;
-  if (!ctx?.reportInput) {
-    delete full.input;
-  }
-  return full;
+  return rest;
 }
 function getSizableOrigin(input) {
   if (input instanceof Set)
@@ -20313,10 +20567,10 @@ var initializer = (inst, def) => {
 };
 var $ZodError = $constructor("$ZodError", initializer);
 var $ZodRealError = $constructor("$ZodError", initializer, { Parent: Error });
-function flattenError(error49, mapper = (issue3) => issue3.message) {
+function flattenError(error52, mapper = (issue3) => issue3.message) {
   const fieldErrors = {};
   const formErrors = [];
-  for (const sub of error49.issues) {
+  for (const sub of error52.issues) {
     if (sub.path.length > 0) {
       fieldErrors[sub.path[0]] = fieldErrors[sub.path[0]] || [];
       fieldErrors[sub.path[0]].push(mapper(sub));
@@ -20326,50 +20580,53 @@ function flattenError(error49, mapper = (issue3) => issue3.message) {
   }
   return { formErrors, fieldErrors };
 }
-function formatError(error49, mapper = (issue3) => issue3.message) {
+function formatError(error52, mapper = (issue3) => issue3.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error50) => {
-    for (const issue3 of error50.issues) {
+  const processError = (error53, path = []) => {
+    for (const issue3 of error53.issues) {
       if (issue3.code === "invalid_union" && issue3.errors.length) {
-        issue3.errors.map((issues) => processError({ issues }));
+        issue3.errors.map((issues) => processError({ issues }, [...path, ...issue3.path]));
       } else if (issue3.code === "invalid_key") {
-        processError({ issues: issue3.issues });
+        processError({ issues: issue3.issues }, [...path, ...issue3.path]);
       } else if (issue3.code === "invalid_element") {
-        processError({ issues: issue3.issues });
-      } else if (issue3.path.length === 0) {
-        fieldErrors._errors.push(mapper(issue3));
+        processError({ issues: issue3.issues }, [...path, ...issue3.path]);
       } else {
-        let curr = fieldErrors;
-        let i = 0;
-        while (i < issue3.path.length) {
-          const el = issue3.path[i];
-          const terminal = i === issue3.path.length - 1;
-          if (!terminal) {
-            curr[el] = curr[el] || { _errors: [] };
-          } else {
-            curr[el] = curr[el] || { _errors: [] };
-            curr[el]._errors.push(mapper(issue3));
+        const fullpath = [...path, ...issue3.path];
+        if (fullpath.length === 0) {
+          fieldErrors._errors.push(mapper(issue3));
+        } else {
+          let curr = fieldErrors;
+          let i = 0;
+          while (i < fullpath.length) {
+            const el = fullpath[i];
+            const terminal = i === fullpath.length - 1;
+            if (!terminal) {
+              curr[el] = curr[el] || { _errors: [] };
+            } else {
+              curr[el] = curr[el] || { _errors: [] };
+              curr[el]._errors.push(mapper(issue3));
+            }
+            curr = curr[el];
+            i++;
           }
-          curr = curr[el];
-          i++;
         }
       }
     }
   };
-  processError(error49);
+  processError(error52);
   return fieldErrors;
 }
-function treeifyError(error49, mapper = (issue3) => issue3.message) {
+function treeifyError(error52, mapper = (issue3) => issue3.message) {
   const result = { errors: [] };
-  const processError = (error50, path = []) => {
-    var _a2, _b;
-    for (const issue3 of error50.issues) {
+  const processError = (error53, path = []) => {
+    var _a3, _b;
+    for (const issue3 of error53.issues) {
       if (issue3.code === "invalid_union" && issue3.errors.length) {
-        issue3.errors.map((issues) => processError({ issues }, issue3.path));
+        issue3.errors.map((issues) => processError({ issues }, [...path, ...issue3.path]));
       } else if (issue3.code === "invalid_key") {
-        processError({ issues: issue3.issues }, issue3.path);
+        processError({ issues: issue3.issues }, [...path, ...issue3.path]);
       } else if (issue3.code === "invalid_element") {
-        processError({ issues: issue3.issues }, issue3.path);
+        processError({ issues: issue3.issues }, [...path, ...issue3.path]);
       } else {
         const fullpath = [...path, ...issue3.path];
         if (fullpath.length === 0) {
@@ -20383,7 +20640,7 @@ function treeifyError(error49, mapper = (issue3) => issue3.message) {
           const terminal = i === fullpath.length - 1;
           if (typeof el === "string") {
             curr.properties ?? (curr.properties = {});
-            (_a2 = curr.properties)[el] ?? (_a2[el] = { errors: [] });
+            (_a3 = curr.properties)[el] ?? (_a3[el] = { errors: [] });
             curr = curr.properties[el];
           } else {
             curr.items ?? (curr.items = []);
@@ -20398,7 +20655,7 @@ function treeifyError(error49, mapper = (issue3) => issue3.message) {
       }
     }
   };
-  processError(error49);
+  processError(error52);
   return result;
 }
 function toDotPath(_path) {
@@ -20419,9 +20676,9 @@ function toDotPath(_path) {
   }
   return segs.join("");
 }
-function prettifyError(error49) {
+function prettifyError(error52) {
   const lines = [];
-  const issues = [...error49.issues].sort((a, b) => (a.path ?? []).length - (b.path ?? []).length);
+  const issues = [...error52.issues].sort((a, b) => (a.path ?? []).length - (b.path ?? []).length);
   for (const issue3 of issues) {
     lines.push(`\u2716 ${issue3.message}`);
     if (issue3.path?.length)
@@ -20432,7 +20689,7 @@ function prettifyError(error49) {
 
 // node_modules/zod/v4/core/parse.js
 var _parse = (_Err) => (schema, value, _ctx, _params) => {
-  const ctx = _ctx ? Object.assign(_ctx, { async: false }) : { async: false };
+  const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
   const result = schema._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
@@ -20446,7 +20703,7 @@ var _parse = (_Err) => (schema, value, _ctx, _params) => {
 };
 var parse = /* @__PURE__ */ _parse($ZodRealError);
 var _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
-  const ctx = _ctx ? Object.assign(_ctx, { async: true }) : { async: true };
+  const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
   let result = schema._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
@@ -20471,7 +20728,7 @@ var _safeParse = (_Err) => (schema, value, _ctx) => {
 };
 var safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
 var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
-  const ctx = _ctx ? Object.assign(_ctx, { async: true }) : { async: true };
+  const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
   let result = schema._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
@@ -20482,7 +20739,7 @@ var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
 };
 var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
 var _encode = (_Err) => (schema, value, _ctx) => {
-  const ctx = _ctx ? Object.assign(_ctx, { direction: "backward" }) : { direction: "backward" };
+  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
   return _parse(_Err)(schema, value, ctx);
 };
 var encode = /* @__PURE__ */ _encode($ZodRealError);
@@ -20491,7 +20748,7 @@ var _decode = (_Err) => (schema, value, _ctx) => {
 };
 var decode = /* @__PURE__ */ _decode($ZodRealError);
 var _encodeAsync = (_Err) => async (schema, value, _ctx) => {
-  const ctx = _ctx ? Object.assign(_ctx, { direction: "backward" }) : { direction: "backward" };
+  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
   return _parseAsync(_Err)(schema, value, ctx);
 };
 var encodeAsync = /* @__PURE__ */ _encodeAsync($ZodRealError);
@@ -20500,7 +20757,7 @@ var _decodeAsync = (_Err) => async (schema, value, _ctx) => {
 };
 var decodeAsync = /* @__PURE__ */ _decodeAsync($ZodRealError);
 var _safeEncode = (_Err) => (schema, value, _ctx) => {
-  const ctx = _ctx ? Object.assign(_ctx, { direction: "backward" }) : { direction: "backward" };
+  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
   return _safeParse(_Err)(schema, value, ctx);
 };
 var safeEncode = /* @__PURE__ */ _safeEncode($ZodRealError);
@@ -20509,7 +20766,7 @@ var _safeDecode = (_Err) => (schema, value, _ctx) => {
 };
 var safeDecode = /* @__PURE__ */ _safeDecode($ZodRealError);
 var _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
-  const ctx = _ctx ? Object.assign(_ctx, { direction: "backward" }) : { direction: "backward" };
+  const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
   return _safeParseAsync(_Err)(schema, value, ctx);
 };
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync($ZodRealError);
@@ -20542,6 +20799,7 @@ __export(regexes_exports, {
   hex: () => hex,
   hostname: () => hostname,
   html5Email: () => html5Email,
+  httpProtocol: () => httpProtocol,
   idnEmail: () => idnEmail,
   integer: () => integer,
   ipv4: () => ipv4,
@@ -20580,7 +20838,7 @@ __export(regexes_exports, {
   uuid7: () => uuid7,
   xid: () => xid
 });
-var cuid = /^[cC][^\s-]{8,}$/;
+var cuid = /^[cC][0-9a-z]{6,}$/;
 var cuid2 = /^[0-9a-z]+$/;
 var ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
 var xid = /^[0-9a-vA-V]{20}$/;
@@ -20619,6 +20877,7 @@ var base64 = /^$|^(?:[0-9a-zA-Z+/]{4})*(?:(?:[0-9a-zA-Z+/]{2}==)|(?:[0-9a-zA-Z+/
 var base64url = /^[A-Za-z0-9_-]*$/;
 var hostname = /^(?=.{1,253}\.?$)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[-0-9a-zA-Z]{0,61}[0-9a-zA-Z])?)*\.?$/;
 var domain = /^([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+var httpProtocol = /^https?$/;
 var e164 = /^\+[1-9]\d{6,14}$/;
 var dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`;
 var date = /* @__PURE__ */ new RegExp(`^${dateSource}$`);
@@ -20677,10 +20936,10 @@ var sha512_base64url = /* @__PURE__ */ fixedBase64url(86);
 
 // node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
-  var _a2;
+  var _a3;
   inst._zod ?? (inst._zod = {});
   inst._zod.def = def;
-  (_a2 = inst._zod).onattach ?? (_a2.onattach = []);
+  (_a3 = inst._zod).onattach ?? (_a3.onattach = []);
 });
 var numericOriginMap = {
   number: "number",
@@ -20746,8 +21005,8 @@ var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", 
 var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
   $ZodCheck.init(inst, def);
   inst._zod.onattach.push((inst2) => {
-    var _a2;
-    (_a2 = inst2._zod.bag).multipleOf ?? (_a2.multipleOf = def.value);
+    var _a3;
+    (_a3 = inst2._zod.bag).multipleOf ?? (_a3.multipleOf = def.value);
   });
   inst._zod.check = (payload) => {
     if (typeof payload.value !== typeof def.value)
@@ -20880,9 +21139,9 @@ var $ZodCheckBigIntFormat = /* @__PURE__ */ $constructor("$ZodCheckBigIntFormat"
   };
 });
 var $ZodCheckMaxSize = /* @__PURE__ */ $constructor("$ZodCheckMaxSize", (inst, def) => {
-  var _a2;
+  var _a3;
   $ZodCheck.init(inst, def);
-  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
+  (_a3 = inst._zod.def).when ?? (_a3.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.size !== void 0;
   });
@@ -20908,9 +21167,9 @@ var $ZodCheckMaxSize = /* @__PURE__ */ $constructor("$ZodCheckMaxSize", (inst, d
   };
 });
 var $ZodCheckMinSize = /* @__PURE__ */ $constructor("$ZodCheckMinSize", (inst, def) => {
-  var _a2;
+  var _a3;
   $ZodCheck.init(inst, def);
-  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
+  (_a3 = inst._zod.def).when ?? (_a3.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.size !== void 0;
   });
@@ -20936,9 +21195,9 @@ var $ZodCheckMinSize = /* @__PURE__ */ $constructor("$ZodCheckMinSize", (inst, d
   };
 });
 var $ZodCheckSizeEquals = /* @__PURE__ */ $constructor("$ZodCheckSizeEquals", (inst, def) => {
-  var _a2;
+  var _a3;
   $ZodCheck.init(inst, def);
-  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
+  (_a3 = inst._zod.def).when ?? (_a3.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.size !== void 0;
   });
@@ -20966,9 +21225,9 @@ var $ZodCheckSizeEquals = /* @__PURE__ */ $constructor("$ZodCheckSizeEquals", (i
   };
 });
 var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
-  var _a2;
+  var _a3;
   $ZodCheck.init(inst, def);
-  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
+  (_a3 = inst._zod.def).when ?? (_a3.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.length !== void 0;
   });
@@ -20995,9 +21254,9 @@ var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (ins
   };
 });
 var $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (inst, def) => {
-  var _a2;
+  var _a3;
   $ZodCheck.init(inst, def);
-  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
+  (_a3 = inst._zod.def).when ?? (_a3.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.length !== void 0;
   });
@@ -21024,9 +21283,9 @@ var $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (ins
   };
 });
 var $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals", (inst, def) => {
-  var _a2;
+  var _a3;
   $ZodCheck.init(inst, def);
-  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
+  (_a3 = inst._zod.def).when ?? (_a3.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.length !== void 0;
   });
@@ -21055,7 +21314,7 @@ var $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals"
   };
 });
 var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat", (inst, def) => {
-  var _a2, _b;
+  var _a3, _b;
   $ZodCheck.init(inst, def);
   inst._zod.onattach.push((inst2) => {
     const bag = inst2._zod.bag;
@@ -21066,7 +21325,7 @@ var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat"
     }
   });
   if (def.pattern)
-    (_a2 = inst._zod).check ?? (_a2.check = (payload) => {
+    (_a3 = inst._zod).check ?? (_a3.check = (payload) => {
       def.pattern.lastIndex = 0;
       if (def.pattern.test(payload.value))
         return;
@@ -21262,13 +21521,13 @@ var Doc = class {
 // node_modules/zod/v4/core/versions.js
 var version = {
   major: 4,
-  minor: 3,
-  patch: 6
+  minor: 4,
+  patch: 3
 };
 
 // node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
-  var _a2;
+  var _a3;
   inst ?? (inst = {});
   inst._zod.def = def;
   inst._zod.bag = inst._zod.bag || {};
@@ -21283,7 +21542,7 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
     }
   }
   if (checks.length === 0) {
-    (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
+    (_a3 = inst._zod).deferred ?? (_a3.deferred = []);
     inst._zod.deferred?.push(() => {
       inst._zod.run = inst._zod.parse;
     });
@@ -21293,6 +21552,8 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
       let asyncResult;
       for (const ch of checks2) {
         if (ch._zod.def.when) {
+          if (explicitlyAborted(payload))
+            continue;
           const shouldRun = ch._zod.def.when(payload);
           if (!shouldRun)
             continue;
@@ -21433,6 +21694,19 @@ var $ZodURL = /* @__PURE__ */ $constructor("$ZodURL", (inst, def) => {
   inst._zod.check = (payload) => {
     try {
       const trimmed = payload.value.trim();
+      if (!def.normalize && def.protocol?.source === httpProtocol.source) {
+        if (!/^https?:\/\//i.test(trimmed)) {
+          payload.issues.push({
+            code: "invalid_format",
+            format: "url",
+            note: "Invalid URL format",
+            input: payload.value,
+            inst,
+            continue: !def.abort
+          });
+          return;
+        }
+      }
       const url2 = new URL(trimmed);
       if (def.hostname) {
         def.hostname.lastIndex = 0;
@@ -21586,6 +21860,8 @@ var $ZodCIDRv6 = /* @__PURE__ */ $constructor("$ZodCIDRv6", (inst, def) => {
 function isValidBase64(data) {
   if (data === "")
     return true;
+  if (/\s/.test(data))
+    return false;
   if (data.length % 4 !== 0)
     return false;
   try {
@@ -21778,8 +22054,6 @@ var $ZodUndefined = /* @__PURE__ */ $constructor("$ZodUndefined", (inst, def) =>
   $ZodType.init(inst, def);
   inst._zod.pattern = _undefined;
   inst._zod.values = /* @__PURE__ */ new Set([void 0]);
-  inst._zod.optin = "optional";
-  inst._zod.optout = "optional";
   inst._zod.parse = (payload, _ctx) => {
     const input = payload.value;
     if (typeof input === "undefined")
@@ -21908,15 +22182,27 @@ var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
     return payload;
   };
 });
-function handlePropertyResult(result, final, key, input, isOptionalOut) {
+function handlePropertyResult(result, final, key, input, isOptionalIn, isOptionalOut) {
+  const isPresent = key in input;
   if (result.issues.length) {
-    if (isOptionalOut && !(key in input)) {
+    if (isOptionalIn && isOptionalOut && !isPresent) {
       return;
     }
     final.issues.push(...prefixIssues(key, result.issues));
   }
+  if (!isPresent && !isOptionalIn) {
+    if (!result.issues.length) {
+      final.issues.push({
+        code: "invalid_type",
+        expected: "nonoptional",
+        input: void 0,
+        path: [key]
+      });
+    }
+    return;
+  }
   if (result.value === void 0) {
-    if (key in input) {
+    if (isPresent) {
       final.value[key] = void 0;
     }
   } else {
@@ -21944,8 +22230,11 @@ function handleCatchall(proms, input, payload, ctx, def, inst) {
   const keySet = def.keySet;
   const _catchall = def.catchall._zod;
   const t = _catchall.def.type;
+  const isOptionalIn = _catchall.optin === "optional";
   const isOptionalOut = _catchall.optout === "optional";
   for (const key in input) {
+    if (key === "__proto__")
+      continue;
     if (keySet.has(key))
       continue;
     if (t === "never") {
@@ -21954,9 +22243,9 @@ function handleCatchall(proms, input, payload, ctx, def, inst) {
     }
     const r = _catchall.run({ value: input[key], issues: [] }, ctx);
     if (r instanceof Promise) {
-      proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input, isOptionalOut)));
+      proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input, isOptionalIn, isOptionalOut)));
     } else {
-      handlePropertyResult(r, payload, key, input, isOptionalOut);
+      handlePropertyResult(r, payload, key, input, isOptionalIn, isOptionalOut);
     }
   }
   if (unrecognized.length) {
@@ -22022,12 +22311,13 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     const shape = value.shape;
     for (const key of value.keys) {
       const el = shape[key];
+      const isOptionalIn = el._zod.optin === "optional";
       const isOptionalOut = el._zod.optout === "optional";
       const r = el._zod.run({ value: input[key], issues: [] }, ctx);
       if (r instanceof Promise) {
-        proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input, isOptionalOut)));
+        proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input, isOptionalIn, isOptionalOut)));
       } else {
-        handlePropertyResult(r, payload, key, input, isOptionalOut);
+        handlePropertyResult(r, payload, key, input, isOptionalIn, isOptionalOut);
       }
     }
     if (!catchall) {
@@ -22058,9 +22348,10 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
       const id = ids[key];
       const k = esc(key);
       const schema = shape[key];
+      const isOptionalIn = schema?._zod?.optin === "optional";
       const isOptionalOut = schema?._zod?.optout === "optional";
       doc.write(`const ${id} = ${parseStr(key)};`);
-      if (isOptionalOut) {
+      if (isOptionalIn && isOptionalOut) {
         doc.write(`
         if (${id}.issues.length) {
           if (${k} in input) {
@@ -22079,6 +22370,33 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
           newResult[${k}] = ${id}.value;
         }
         
+      `);
+      } else if (!isOptionalIn) {
+        doc.write(`
+        const ${id}_present = ${k} in input;
+        if (${id}.issues.length) {
+          payload.issues = payload.issues.concat(${id}.issues.map(iss => ({
+            ...iss,
+            path: iss.path ? [${k}, ...iss.path] : [${k}]
+          })));
+        }
+        if (!${id}_present && !${id}.issues.length) {
+          payload.issues.push({
+            code: "invalid_type",
+            expected: "nonoptional",
+            input: undefined,
+            path: [${k}]
+          });
+        }
+
+        if (${id}_present) {
+          if (${id}.value === undefined) {
+            newResult[${k}] = undefined;
+          } else {
+            newResult[${k}] = ${id}.value;
+          }
+        }
+
       `);
       } else {
         doc.write(`
@@ -22172,10 +22490,9 @@ var $ZodUnion = /* @__PURE__ */ $constructor("$ZodUnion", (inst, def) => {
     }
     return void 0;
   });
-  const single = def.options.length === 1;
-  const first = def.options[0]._zod.run;
+  const first = def.options.length === 1 ? def.options[0]._zod.run : null;
   inst._zod.parse = (payload, ctx) => {
-    if (single) {
+    if (first) {
       return first(payload, ctx);
     }
     let async = false;
@@ -22228,10 +22545,9 @@ function handleExclusiveUnionResults(results, final, inst, ctx) {
 var $ZodXor = /* @__PURE__ */ $constructor("$ZodXor", (inst, def) => {
   $ZodUnion.init(inst, def);
   def.inclusive = false;
-  const single = def.options.length === 1;
-  const first = def.options[0]._zod.run;
+  const first = def.options.length === 1 ? def.options[0]._zod.run : null;
   inst._zod.parse = (payload, ctx) => {
-    if (single) {
+    if (first) {
       return first(payload, ctx);
     }
     let async = false;
@@ -22306,7 +22622,7 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
     if (opt) {
       return opt._zod.run(payload, ctx);
     }
-    if (def.unionFallback) {
+    if (def.unionFallback || ctx.direction === "backward") {
       return _super(payload, ctx);
     }
     payload.issues.push({
@@ -22314,6 +22630,7 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
       errors: [],
       note: "No matching discriminator",
       discriminator: def.discriminator,
+      options: Array.from(disc.value.keys()),
       input,
       path: [def.discriminator],
       inst
@@ -22435,63 +22752,95 @@ var $ZodTuple = /* @__PURE__ */ $constructor("$ZodTuple", (inst, def) => {
     }
     payload.value = [];
     const proms = [];
-    const reversedIndex = [...items].reverse().findIndex((item) => item._zod.optin !== "optional");
-    const optStart = reversedIndex === -1 ? 0 : items.length - reversedIndex;
+    const optinStart = getTupleOptStart(items, "optin");
+    const optoutStart = getTupleOptStart(items, "optout");
     if (!def.rest) {
-      const tooBig = input.length > items.length;
-      const tooSmall = input.length < optStart - 1;
-      if (tooBig || tooSmall) {
+      if (input.length < optinStart) {
         payload.issues.push({
-          ...tooBig ? { code: "too_big", maximum: items.length, inclusive: true } : { code: "too_small", minimum: items.length },
+          code: "too_small",
+          minimum: optinStart,
+          inclusive: true,
           input,
           inst,
           origin: "array"
         });
         return payload;
       }
-    }
-    let i = -1;
-    for (const item of items) {
-      i++;
-      if (i >= input.length) {
-        if (i >= optStart)
-          continue;
+      if (input.length > items.length) {
+        payload.issues.push({
+          code: "too_big",
+          maximum: items.length,
+          inclusive: true,
+          input,
+          inst,
+          origin: "array"
+        });
       }
-      const result = item._zod.run({
-        value: input[i],
-        issues: []
-      }, ctx);
-      if (result instanceof Promise) {
-        proms.push(result.then((result2) => handleTupleResult(result2, payload, i)));
+    }
+    const itemResults = new Array(items.length);
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i]._zod.run({ value: input[i], issues: [] }, ctx);
+      if (r instanceof Promise) {
+        proms.push(r.then((rr) => {
+          itemResults[i] = rr;
+        }));
       } else {
-        handleTupleResult(result, payload, i);
+        itemResults[i] = r;
       }
     }
     if (def.rest) {
+      let i = items.length - 1;
       const rest = input.slice(items.length);
       for (const el of rest) {
         i++;
-        const result = def.rest._zod.run({
-          value: el,
-          issues: []
-        }, ctx);
+        const result = def.rest._zod.run({ value: el, issues: [] }, ctx);
         if (result instanceof Promise) {
-          proms.push(result.then((result2) => handleTupleResult(result2, payload, i)));
+          proms.push(result.then((r) => handleTupleResult(r, payload, i)));
         } else {
           handleTupleResult(result, payload, i);
         }
       }
     }
-    if (proms.length)
-      return Promise.all(proms).then(() => payload);
-    return payload;
+    if (proms.length) {
+      return Promise.all(proms).then(() => handleTupleResults(itemResults, payload, items, input, optoutStart));
+    }
+    return handleTupleResults(itemResults, payload, items, input, optoutStart);
   };
 });
+function getTupleOptStart(items, key) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i]._zod[key] !== "optional")
+      return i + 1;
+  }
+  return 0;
+}
 function handleTupleResult(result, final, index) {
   if (result.issues.length) {
     final.issues.push(...prefixIssues(index, result.issues));
   }
   final.value[index] = result.value;
+}
+function handleTupleResults(itemResults, final, items, input, optoutStart) {
+  for (let i = 0; i < items.length; i++) {
+    const r = itemResults[i];
+    const isPresent = i < input.length;
+    if (r.issues.length) {
+      if (!isPresent && i >= optoutStart) {
+        final.value.length = i;
+        break;
+      }
+      final.issues.push(...prefixIssues(i, r.issues));
+    }
+    final.value[i] = r.value;
+  }
+  for (let i = final.value.length - 1; i >= input.length; i--) {
+    if (items[i]._zod.optout === "optional" && final.value[i] === void 0) {
+      final.value.length = i;
+    } else {
+      break;
+    }
+  }
+  return final;
 }
 var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
   $ZodType.init(inst, def);
@@ -22514,19 +22863,35 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
       for (const key of values) {
         if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
           recordKeys.add(typeof key === "number" ? key.toString() : key);
+          const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+          if (keyResult instanceof Promise) {
+            throw new Error("Async schemas not supported in object keys currently");
+          }
+          if (keyResult.issues.length) {
+            payload.issues.push({
+              code: "invalid_key",
+              origin: "record",
+              issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
+              input: key,
+              path: [key],
+              inst
+            });
+            continue;
+          }
+          const outKey = keyResult.value;
           const result = def.valueType._zod.run({ value: input[key], issues: [] }, ctx);
           if (result instanceof Promise) {
             proms.push(result.then((result2) => {
               if (result2.issues.length) {
                 payload.issues.push(...prefixIssues(key, result2.issues));
               }
-              payload.value[key] = result2.value;
+              payload.value[outKey] = result2.value;
             }));
           } else {
             if (result.issues.length) {
               payload.issues.push(...prefixIssues(key, result.issues));
             }
-            payload.value[key] = result.value;
+            payload.value[outKey] = result.value;
           }
         }
       }
@@ -22549,6 +22914,8 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
       payload.value = {};
       for (const key of Reflect.ownKeys(input)) {
         if (key === "__proto__")
+          continue;
+        if (!Object.prototype.propertyIsEnumerable.call(input, key))
           continue;
         let keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
         if (keyResult instanceof Promise) {
@@ -22754,6 +23121,7 @@ var $ZodFile = /* @__PURE__ */ $constructor("$ZodFile", (inst, def) => {
 });
 var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) => {
   $ZodType.init(inst, def);
+  inst._zod.optin = "optional";
   inst._zod.parse = (payload, ctx) => {
     if (ctx.direction === "backward") {
       throw new $ZodEncodeError(inst.constructor.name);
@@ -22763,6 +23131,7 @@ var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) =>
       const output = _out instanceof Promise ? _out : Promise.resolve(_out);
       return output.then((output2) => {
         payload.value = output2;
+        payload.fallback = true;
         return payload;
       });
     }
@@ -22770,11 +23139,12 @@ var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) =>
       throw new $ZodAsyncError();
     }
     payload.value = _out;
+    payload.fallback = true;
     return payload;
   };
 });
 function handleOptionalResult(result, input) {
-  if (result.issues.length && input === void 0) {
+  if (input === void 0 && (result.issues.length || result.fallback)) {
     return { issues: [], value: void 0 };
   }
   return result;
@@ -22792,10 +23162,11 @@ var $ZodOptional = /* @__PURE__ */ $constructor("$ZodOptional", (inst, def) => {
   });
   inst._zod.parse = (payload, ctx) => {
     if (def.innerType._zod.optin === "optional") {
+      const input = payload.value;
       const result = def.innerType._zod.run(payload, ctx);
       if (result instanceof Promise)
-        return result.then((r) => handleOptionalResult(r, payload.value));
-      return handleOptionalResult(result, payload.value);
+        return result.then((r) => handleOptionalResult(r, input));
+      return handleOptionalResult(result, input);
     }
     if (payload.value === void 0) {
       return payload;
@@ -22911,7 +23282,7 @@ var $ZodSuccess = /* @__PURE__ */ $constructor("$ZodSuccess", (inst, def) => {
 });
 var $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
   $ZodType.init(inst, def);
-  defineLazy(inst._zod, "optin", () => def.innerType._zod.optin);
+  inst._zod.optin = "optional";
   defineLazy(inst._zod, "optout", () => def.innerType._zod.optout);
   defineLazy(inst._zod, "values", () => def.innerType._zod.values);
   inst._zod.parse = (payload, ctx) => {
@@ -22931,6 +23302,7 @@ var $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
             input: payload.value
           });
           payload.issues = [];
+          payload.fallback = true;
         }
         return payload;
       });
@@ -22945,6 +23317,7 @@ var $ZodCatch = /* @__PURE__ */ $constructor("$ZodCatch", (inst, def) => {
         input: payload.value
       });
       payload.issues = [];
+      payload.fallback = true;
     }
     return payload;
   };
@@ -22990,7 +23363,7 @@ function handlePipeResult(left, next, ctx) {
     left.aborted = true;
     return left;
   }
-  return next._zod.run({ value: left.value, issues: left.issues }, ctx);
+  return next._zod.run({ value: left.value, issues: left.issues, fallback: left.fallback }, ctx);
 }
 var $ZodCodec = /* @__PURE__ */ $constructor("$ZodCodec", (inst, def) => {
   $ZodType.init(inst, def);
@@ -23042,6 +23415,9 @@ function handleCodecTxResult(left, value, nextSchema, ctx) {
   }
   return nextSchema._zod.run({ value, issues: left.issues }, ctx);
 }
+var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
+  $ZodPipe.init(inst, def);
+});
 var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazy(inst._zod, "propValues", () => def.innerType._zod.propValues);
@@ -23193,7 +23569,12 @@ var $ZodPromise = /* @__PURE__ */ $constructor("$ZodPromise", (inst, def) => {
 });
 var $ZodLazy = /* @__PURE__ */ $constructor("$ZodLazy", (inst, def) => {
   $ZodType.init(inst, def);
-  defineLazy(inst._zod, "innerType", () => def.getter());
+  defineLazy(inst._zod, "innerType", () => {
+    const d = def;
+    if (!d._cachedInner)
+      d._cachedInner = def.getter();
+    return d._cachedInner;
+  });
   defineLazy(inst._zod, "pattern", () => inst._zod.innerType?._zod?.pattern);
   defineLazy(inst._zod, "propValues", () => inst._zod.innerType?._zod?.propValues);
   defineLazy(inst._zod, "optin", () => inst._zod.innerType?._zod?.optin ?? void 0);
@@ -23248,6 +23629,7 @@ __export(locales_exports, {
   cs: () => cs_default,
   da: () => da_default,
   de: () => de_default,
+  el: () => el_default,
   en: () => en_default,
   eo: () => eo_default,
   es: () => es_default,
@@ -23256,6 +23638,7 @@ __export(locales_exports, {
   fr: () => fr_default,
   frCA: () => fr_CA_default,
   he: () => he_default,
+  hr: () => hr_default,
   hu: () => hu_default,
   hy: () => hy_default,
   id: () => id_default,
@@ -23275,6 +23658,7 @@ __export(locales_exports, {
   pl: () => pl_default,
   ps: () => ps_default,
   pt: () => pt_default,
+  ro: () => ro_default,
   ru: () => ru_default,
   sl: () => sl_default,
   sv: () => sv_default,
@@ -24228,8 +24612,118 @@ function de_default() {
   };
 }
 
-// node_modules/zod/v4/locales/en.js
+// node_modules/zod/v4/locales/el.js
 var error10 = () => {
+  const Sizable = {
+    string: { unit: "\u03C7\u03B1\u03C1\u03B1\u03BA\u03C4\u03AE\u03C1\u03B5\u03C2", verb: "\u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9" },
+    file: { unit: "bytes", verb: "\u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9" },
+    array: { unit: "\u03C3\u03C4\u03BF\u03B9\u03C7\u03B5\u03AF\u03B1", verb: "\u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9" },
+    set: { unit: "\u03C3\u03C4\u03BF\u03B9\u03C7\u03B5\u03AF\u03B1", verb: "\u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9" },
+    map: { unit: "\u03BA\u03B1\u03C4\u03B1\u03C7\u03C9\u03C1\u03AE\u03C3\u03B5\u03B9\u03C2", verb: "\u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const FormatDictionary = {
+    regex: "\u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2",
+    email: "\u03B4\u03B9\u03B5\u03CD\u03B8\u03C5\u03BD\u03C3\u03B7 email",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO \u03B7\u03BC\u03B5\u03C1\u03BF\u03BC\u03B7\u03BD\u03AF\u03B1 \u03BA\u03B1\u03B9 \u03CE\u03C1\u03B1",
+    date: "ISO \u03B7\u03BC\u03B5\u03C1\u03BF\u03BC\u03B7\u03BD\u03AF\u03B1",
+    time: "ISO \u03CE\u03C1\u03B1",
+    duration: "ISO \u03B4\u03B9\u03AC\u03C1\u03BA\u03B5\u03B9\u03B1",
+    ipv4: "\u03B4\u03B9\u03B5\u03CD\u03B8\u03C5\u03BD\u03C3\u03B7 IPv4",
+    ipv6: "\u03B4\u03B9\u03B5\u03CD\u03B8\u03C5\u03BD\u03C3\u03B7 IPv6",
+    mac: "\u03B4\u03B9\u03B5\u03CD\u03B8\u03C5\u03BD\u03C3\u03B7 MAC",
+    cidrv4: "\u03B5\u03CD\u03C1\u03BF\u03C2 IPv4",
+    cidrv6: "\u03B5\u03CD\u03C1\u03BF\u03C2 IPv6",
+    base64: "\u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC \u03BA\u03C9\u03B4\u03B9\u03BA\u03BF\u03C0\u03BF\u03B9\u03B7\u03BC\u03AD\u03BD\u03B7 \u03C3\u03B5 base64",
+    base64url: "\u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC \u03BA\u03C9\u03B4\u03B9\u03BA\u03BF\u03C0\u03BF\u03B9\u03B7\u03BC\u03AD\u03BD\u03B7 \u03C3\u03B5 base64url",
+    json_string: "\u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC JSON",
+    e164: "\u03B1\u03C1\u03B9\u03B8\u03BC\u03CC\u03C2 E.164",
+    jwt: "JWT",
+    template_literal: "\u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2"
+  };
+  const TypeDictionary = {
+    nan: "NaN"
+  };
+  return (issue3) => {
+    switch (issue3.code) {
+      case "invalid_type": {
+        const expected = TypeDictionary[issue3.expected] ?? issue3.expected;
+        const receivedType = parsedType(issue3.input);
+        const received = TypeDictionary[receivedType] ?? receivedType;
+        if (typeof issue3.expected === "string" && /^[A-Z]/.test(issue3.expected)) {
+          return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD instanceof ${issue3.expected}, \u03BB\u03AE\u03C6\u03B8\u03B7\u03BA\u03B5 ${received}`;
+        }
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD ${expected}, \u03BB\u03AE\u03C6\u03B8\u03B7\u03BA\u03B5 ${received}`;
+      }
+      case "invalid_value":
+        if (issue3.values.length === 1)
+          return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD ${stringifyPrimitive(issue3.values[0])}`;
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03B5\u03C0\u03B9\u03BB\u03BF\u03B3\u03AE: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD \u03AD\u03BD\u03B1 \u03B1\u03C0\u03CC ${joinValues(issue3.values, "|")}`;
+      case "too_big": {
+        const adj = issue3.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue3.origin);
+        if (sizing)
+          return `\u03A0\u03BF\u03BB\u03CD \u03BC\u03B5\u03B3\u03AC\u03BB\u03BF: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD ${issue3.origin ?? "\u03C4\u03B9\u03BC\u03AE"} \u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9 ${adj}${issue3.maximum.toString()} ${sizing.unit ?? "\u03C3\u03C4\u03BF\u03B9\u03C7\u03B5\u03AF\u03B1"}`;
+        return `\u03A0\u03BF\u03BB\u03CD \u03BC\u03B5\u03B3\u03AC\u03BB\u03BF: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD ${issue3.origin ?? "\u03C4\u03B9\u03BC\u03AE"} \u03BD\u03B1 \u03B5\u03AF\u03BD\u03B1\u03B9 ${adj}${issue3.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue3.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue3.origin);
+        if (sizing) {
+          return `\u03A0\u03BF\u03BB\u03CD \u03BC\u03B9\u03BA\u03C1\u03CC: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD ${issue3.origin} \u03BD\u03B1 \u03AD\u03C7\u03B5\u03B9 ${adj}${issue3.minimum.toString()} ${sizing.unit}`;
+        }
+        return `\u03A0\u03BF\u03BB\u03CD \u03BC\u03B9\u03BA\u03C1\u03CC: \u03B1\u03BD\u03B1\u03BC\u03B5\u03BD\u03CC\u03C4\u03B1\u03BD ${issue3.origin} \u03BD\u03B1 \u03B5\u03AF\u03BD\u03B1\u03B9 ${adj}${issue3.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue3;
+        if (_issue.format === "starts_with") {
+          return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC: \u03C0\u03C1\u03AD\u03C0\u03B5\u03B9 \u03BD\u03B1 \u03BE\u03B5\u03BA\u03B9\u03BD\u03AC \u03BC\u03B5 "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC: \u03C0\u03C1\u03AD\u03C0\u03B5\u03B9 \u03BD\u03B1 \u03C4\u03B5\u03BB\u03B5\u03B9\u03CE\u03BD\u03B5\u03B9 \u03BC\u03B5 "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC: \u03C0\u03C1\u03AD\u03C0\u03B5\u03B9 \u03BD\u03B1 \u03C0\u03B5\u03C1\u03B9\u03AD\u03C7\u03B5\u03B9 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03C3\u03C5\u03BC\u03B2\u03BF\u03BB\u03BF\u03C3\u03B5\u03B9\u03C1\u03AC: \u03C0\u03C1\u03AD\u03C0\u03B5\u03B9 \u03BD\u03B1 \u03C4\u03B1\u03B9\u03C1\u03B9\u03AC\u03B6\u03B5\u03B9 \u03BC\u03B5 \u03C4\u03BF \u03BC\u03BF\u03C4\u03AF\u03B2\u03BF ${_issue.pattern}`;
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03BF: ${FormatDictionary[_issue.format] ?? issue3.format}`;
+      }
+      case "not_multiple_of":
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03BF\u03C2 \u03B1\u03C1\u03B9\u03B8\u03BC\u03CC\u03C2: \u03C0\u03C1\u03AD\u03C0\u03B5\u03B9 \u03BD\u03B1 \u03B5\u03AF\u03BD\u03B1\u03B9 \u03C0\u03BF\u03BB\u03BB\u03B1\u03C0\u03BB\u03AC\u03C3\u03B9\u03BF \u03C4\u03BF\u03C5 ${issue3.divisor}`;
+      case "unrecognized_keys":
+        return `\u0386\u03B3\u03BD\u03C9\u03C3\u03C4${issue3.keys.length > 1 ? "\u03B1" : "\u03BF"} \u03BA\u03BB\u03B5\u03B9\u03B4${issue3.keys.length > 1 ? "\u03B9\u03AC" : "\u03AF"}: ${joinValues(issue3.keys, ", ")}`;
+      case "invalid_key":
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03BF \u03BA\u03BB\u03B5\u03B9\u03B4\u03AF \u03C3\u03C4\u03BF ${issue3.origin}`;
+      case "invalid_union":
+        return "\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2";
+      case "invalid_element":
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03C4\u03B9\u03BC\u03AE \u03C3\u03C4\u03BF ${issue3.origin}`;
+      default:
+        return `\u039C\u03B7 \u03AD\u03B3\u03BA\u03C5\u03C1\u03B7 \u03B5\u03AF\u03C3\u03BF\u03B4\u03BF\u03C2`;
+    }
+  };
+};
+function el_default() {
+  return {
+    localeError: error10()
+  };
+}
+
+// node_modules/zod/v4/locales/en.js
+var error11 = () => {
   const Sizable = {
     string: { unit: "characters", verb: "to have" },
     file: { unit: "bytes", verb: "to have" },
@@ -24323,6 +24817,10 @@ var error10 = () => {
       case "invalid_key":
         return `Invalid key in ${issue3.origin}`;
       case "invalid_union":
+        if (issue3.options && Array.isArray(issue3.options) && issue3.options.length > 0) {
+          const opts = issue3.options.map((o) => `'${o}'`).join(" | ");
+          return `Invalid discriminator value. Expected ${opts}`;
+        }
         return "Invalid input";
       case "invalid_element":
         return `Invalid value in ${issue3.origin}`;
@@ -24333,12 +24831,12 @@ var error10 = () => {
 };
 function en_default() {
   return {
-    localeError: error10()
+    localeError: error11()
   };
 }
 
 // node_modules/zod/v4/locales/eo.js
-var error11 = () => {
+var error12 = () => {
   const Sizable = {
     string: { unit: "karaktrojn", verb: "havi" },
     file: { unit: "bajtojn", verb: "havi" },
@@ -24443,12 +24941,12 @@ var error11 = () => {
 };
 function eo_default() {
   return {
-    localeError: error11()
+    localeError: error12()
   };
 }
 
 // node_modules/zod/v4/locales/es.js
-var error12 = () => {
+var error13 = () => {
   const Sizable = {
     string: { unit: "caracteres", verb: "tener" },
     file: { unit: "bytes", verb: "tener" },
@@ -24576,12 +25074,12 @@ var error12 = () => {
 };
 function es_default() {
   return {
-    localeError: error12()
+    localeError: error13()
   };
 }
 
 // node_modules/zod/v4/locales/fa.js
-var error13 = () => {
+var error14 = () => {
   const Sizable = {
     string: { unit: "\u06A9\u0627\u0631\u0627\u06A9\u062A\u0631", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
     file: { unit: "\u0628\u0627\u06CC\u062A", verb: "\u062F\u0627\u0634\u062A\u0647 \u0628\u0627\u0634\u062F" },
@@ -24691,12 +25189,12 @@ var error13 = () => {
 };
 function fa_default() {
   return {
-    localeError: error13()
+    localeError: error14()
   };
 }
 
 // node_modules/zod/v4/locales/fi.js
-var error14 = () => {
+var error15 = () => {
   const Sizable = {
     string: { unit: "merkki\xE4", subject: "merkkijonon" },
     file: { unit: "tavua", subject: "tiedoston" },
@@ -24804,12 +25302,12 @@ var error14 = () => {
 };
 function fi_default() {
   return {
-    localeError: error14()
+    localeError: error15()
   };
 }
 
 // node_modules/zod/v4/locales/fr.js
-var error15 = () => {
+var error16 = () => {
   const Sizable = {
     string: { unit: "caract\xE8res", verb: "avoir" },
     file: { unit: "octets", verb: "avoir" },
@@ -24850,9 +25348,27 @@ var error15 = () => {
     template_literal: "entr\xE9e"
   };
   const TypeDictionary = {
-    nan: "NaN",
+    string: "cha\xEEne",
     number: "nombre",
-    array: "tableau"
+    int: "entier",
+    boolean: "bool\xE9en",
+    bigint: "grand entier",
+    symbol: "symbole",
+    undefined: "ind\xE9fini",
+    null: "null",
+    never: "jamais",
+    void: "vide",
+    date: "date",
+    array: "tableau",
+    object: "objet",
+    tuple: "tuple",
+    record: "enregistrement",
+    map: "carte",
+    set: "ensemble",
+    file: "fichier",
+    nonoptional: "non-optionnel",
+    nan: "NaN",
+    function: "fonction"
   };
   return (issue3) => {
     switch (issue3.code) {
@@ -24873,16 +25389,15 @@ var error15 = () => {
         const adj = issue3.inclusive ? "<=" : "<";
         const sizing = getSizing(issue3.origin);
         if (sizing)
-          return `Trop grand : ${issue3.origin ?? "valeur"} doit ${sizing.verb} ${adj}${issue3.maximum.toString()} ${sizing.unit ?? "\xE9l\xE9ment(s)"}`;
-        return `Trop grand : ${issue3.origin ?? "valeur"} doit \xEAtre ${adj}${issue3.maximum.toString()}`;
+          return `Trop grand : ${TypeDictionary[issue3.origin] ?? "valeur"} doit ${sizing.verb} ${adj}${issue3.maximum.toString()} ${sizing.unit ?? "\xE9l\xE9ment(s)"}`;
+        return `Trop grand : ${TypeDictionary[issue3.origin] ?? "valeur"} doit \xEAtre ${adj}${issue3.maximum.toString()}`;
       }
       case "too_small": {
         const adj = issue3.inclusive ? ">=" : ">";
         const sizing = getSizing(issue3.origin);
-        if (sizing) {
-          return `Trop petit : ${issue3.origin} doit ${sizing.verb} ${adj}${issue3.minimum.toString()} ${sizing.unit}`;
-        }
-        return `Trop petit : ${issue3.origin} doit \xEAtre ${adj}${issue3.minimum.toString()}`;
+        if (sizing)
+          return `Trop petit : ${TypeDictionary[issue3.origin] ?? "valeur"} doit ${sizing.verb} ${adj}${issue3.minimum.toString()} ${sizing.unit}`;
+        return `Trop petit : ${TypeDictionary[issue3.origin] ?? "valeur"} doit \xEAtre ${adj}${issue3.minimum.toString()}`;
       }
       case "invalid_format": {
         const _issue = issue3;
@@ -24913,12 +25428,12 @@ var error15 = () => {
 };
 function fr_default() {
   return {
-    localeError: error15()
+    localeError: error16()
   };
 }
 
 // node_modules/zod/v4/locales/fr-CA.js
-var error16 = () => {
+var error17 = () => {
   const Sizable = {
     string: { unit: "caract\xE8res", verb: "avoir" },
     file: { unit: "octets", verb: "avoir" },
@@ -25021,12 +25536,12 @@ var error16 = () => {
 };
 function fr_CA_default() {
   return {
-    localeError: error16()
+    localeError: error17()
   };
 }
 
 // node_modules/zod/v4/locales/he.js
-var error17 = () => {
+var error18 = () => {
   const TypeNames = {
     string: { label: "\u05DE\u05D7\u05E8\u05D5\u05D6\u05EA", gender: "f" },
     number: { label: "\u05DE\u05E1\u05E4\u05E8", gender: "m" },
@@ -25216,12 +25731,135 @@ var error17 = () => {
 };
 function he_default() {
   return {
-    localeError: error17()
+    localeError: error18()
+  };
+}
+
+// node_modules/zod/v4/locales/hr.js
+var error19 = () => {
+  const Sizable = {
+    string: { unit: "znakova", verb: "imati" },
+    file: { unit: "bajtova", verb: "imati" },
+    array: { unit: "stavki", verb: "imati" },
+    set: { unit: "stavki", verb: "imati" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const FormatDictionary = {
+    regex: "unos",
+    email: "email adresa",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "ISO datum i vrijeme",
+    date: "ISO datum",
+    time: "ISO vrijeme",
+    duration: "ISO trajanje",
+    ipv4: "IPv4 adresa",
+    ipv6: "IPv6 adresa",
+    cidrv4: "IPv4 raspon",
+    cidrv6: "IPv6 raspon",
+    base64: "base64 kodirani tekst",
+    base64url: "base64url kodirani tekst",
+    json_string: "JSON tekst",
+    e164: "E.164 broj",
+    jwt: "JWT",
+    template_literal: "unos"
+  };
+  const TypeDictionary = {
+    nan: "NaN",
+    string: "tekst",
+    number: "broj",
+    boolean: "boolean",
+    array: "niz",
+    object: "objekt",
+    set: "skup",
+    file: "datoteka",
+    date: "datum",
+    bigint: "bigint",
+    symbol: "simbol",
+    undefined: "undefined",
+    null: "null",
+    function: "funkcija",
+    map: "mapa"
+  };
+  return (issue3) => {
+    switch (issue3.code) {
+      case "invalid_type": {
+        const expected = TypeDictionary[issue3.expected] ?? issue3.expected;
+        const receivedType = parsedType(issue3.input);
+        const received = TypeDictionary[receivedType] ?? receivedType;
+        if (/^[A-Z]/.test(issue3.expected)) {
+          return `Neispravan unos: o\u010Dekuje se instanceof ${issue3.expected}, a primljeno je ${received}`;
+        }
+        return `Neispravan unos: o\u010Dekuje se ${expected}, a primljeno je ${received}`;
+      }
+      case "invalid_value":
+        if (issue3.values.length === 1)
+          return `Neispravna vrijednost: o\u010Dekivano ${stringifyPrimitive(issue3.values[0])}`;
+        return `Neispravna opcija: o\u010Dekivano jedno od ${joinValues(issue3.values, "|")}`;
+      case "too_big": {
+        const adj = issue3.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue3.origin);
+        const origin = TypeDictionary[issue3.origin] ?? issue3.origin;
+        if (sizing)
+          return `Preveliko: o\u010Dekivano da ${origin ?? "vrijednost"} ima ${adj}${issue3.maximum.toString()} ${sizing.unit ?? "elemenata"}`;
+        return `Preveliko: o\u010Dekivano da ${origin ?? "vrijednost"} bude ${adj}${issue3.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue3.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue3.origin);
+        const origin = TypeDictionary[issue3.origin] ?? issue3.origin;
+        if (sizing) {
+          return `Premalo: o\u010Dekivano da ${origin} ima ${adj}${issue3.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Premalo: o\u010Dekivano da ${origin} bude ${adj}${issue3.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue3;
+        if (_issue.format === "starts_with")
+          return `Neispravan tekst: mora zapo\u010Dinjati s "${_issue.prefix}"`;
+        if (_issue.format === "ends_with")
+          return `Neispravan tekst: mora zavr\u0161avati s "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `Neispravan tekst: mora sadr\u017Eavati "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `Neispravan tekst: mora odgovarati uzorku ${_issue.pattern}`;
+        return `Neispravna ${FormatDictionary[_issue.format] ?? issue3.format}`;
+      }
+      case "not_multiple_of":
+        return `Neispravan broj: mora biti vi\u0161ekratnik od ${issue3.divisor}`;
+      case "unrecognized_keys":
+        return `Neprepoznat${issue3.keys.length > 1 ? "i klju\u010Devi" : " klju\u010D"}: ${joinValues(issue3.keys, ", ")}`;
+      case "invalid_key":
+        return `Neispravan klju\u010D u ${TypeDictionary[issue3.origin] ?? issue3.origin}`;
+      case "invalid_union":
+        return "Neispravan unos";
+      case "invalid_element":
+        return `Neispravna vrijednost u ${TypeDictionary[issue3.origin] ?? issue3.origin}`;
+      default:
+        return `Neispravan unos`;
+    }
+  };
+};
+function hr_default() {
+  return {
+    localeError: error19()
   };
 }
 
 // node_modules/zod/v4/locales/hu.js
-var error18 = () => {
+var error20 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "legyen" },
     file: { unit: "byte", verb: "legyen" },
@@ -25325,7 +25963,7 @@ var error18 = () => {
 };
 function hu_default() {
   return {
-    localeError: error18()
+    localeError: error20()
   };
 }
 
@@ -25340,7 +25978,7 @@ function withDefiniteArticle(word2) {
   const lastChar = word2[word2.length - 1];
   return word2 + (vowels.includes(lastChar) ? "\u0576" : "\u0568");
 }
-var error19 = () => {
+var error21 = () => {
   const Sizable = {
     string: {
       unit: {
@@ -25473,12 +26111,12 @@ var error19 = () => {
 };
 function hy_default() {
   return {
-    localeError: error19()
+    localeError: error21()
   };
 }
 
 // node_modules/zod/v4/locales/id.js
-var error20 = () => {
+var error22 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "memiliki" },
     file: { unit: "byte", verb: "memiliki" },
@@ -25580,12 +26218,12 @@ var error20 = () => {
 };
 function id_default() {
   return {
-    localeError: error20()
+    localeError: error22()
   };
 }
 
 // node_modules/zod/v4/locales/is.js
-var error21 = () => {
+var error23 = () => {
   const Sizable = {
     string: { unit: "stafi", verb: "a\xF0 hafa" },
     file: { unit: "b\xE6ti", verb: "a\xF0 hafa" },
@@ -25690,12 +26328,12 @@ var error21 = () => {
 };
 function is_default() {
   return {
-    localeError: error21()
+    localeError: error23()
   };
 }
 
 // node_modules/zod/v4/locales/it.js
-var error22 = () => {
+var error24 = () => {
   const Sizable = {
     string: { unit: "caratteri", verb: "avere" },
     file: { unit: "byte", verb: "avere" },
@@ -25780,7 +26418,7 @@ var error22 = () => {
           return `Stringa non valida: deve includere "${_issue.includes}"`;
         if (_issue.format === "regex")
           return `Stringa non valida: deve corrispondere al pattern ${_issue.pattern}`;
-        return `Invalid ${FormatDictionary[_issue.format] ?? issue3.format}`;
+        return `Input non valido: ${FormatDictionary[_issue.format] ?? issue3.format}`;
       }
       case "not_multiple_of":
         return `Numero non valido: deve essere un multiplo di ${issue3.divisor}`;
@@ -25799,12 +26437,12 @@ var error22 = () => {
 };
 function it_default() {
   return {
-    localeError: error22()
+    localeError: error24()
   };
 }
 
 // node_modules/zod/v4/locales/ja.js
-var error23 = () => {
+var error25 = () => {
   const Sizable = {
     string: { unit: "\u6587\u5B57", verb: "\u3067\u3042\u308B" },
     file: { unit: "\u30D0\u30A4\u30C8", verb: "\u3067\u3042\u308B" },
@@ -25907,12 +26545,12 @@ var error23 = () => {
 };
 function ja_default() {
   return {
-    localeError: error23()
+    localeError: error25()
   };
 }
 
 // node_modules/zod/v4/locales/ka.js
-var error24 = () => {
+var error26 = () => {
   const Sizable = {
     string: { unit: "\u10E1\u10D8\u10DB\u10D1\u10DD\u10DA\u10DD", verb: "\u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D8\u10EA\u10D0\u10D5\u10D3\u10D4\u10E1" },
     file: { unit: "\u10D1\u10D0\u10D8\u10E2\u10D8", verb: "\u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D8\u10EA\u10D0\u10D5\u10D3\u10D4\u10E1" },
@@ -25945,9 +26583,9 @@ var error24 = () => {
     ipv6: "IPv6 \u10DB\u10D8\u10E1\u10D0\u10DB\u10D0\u10E0\u10D7\u10D8",
     cidrv4: "IPv4 \u10D3\u10D8\u10D0\u10DE\u10D0\u10D6\u10DD\u10DC\u10D8",
     cidrv6: "IPv6 \u10D3\u10D8\u10D0\u10DE\u10D0\u10D6\u10DD\u10DC\u10D8",
-    base64: "base64-\u10D9\u10DD\u10D3\u10D8\u10E0\u10D4\u10D1\u10E3\u10DA\u10D8 \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8",
-    base64url: "base64url-\u10D9\u10DD\u10D3\u10D8\u10E0\u10D4\u10D1\u10E3\u10DA\u10D8 \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8",
-    json_string: "JSON \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8",
+    base64: "base64-\u10D9\u10DD\u10D3\u10D8\u10E0\u10D4\u10D1\u10E3\u10DA\u10D8 \u10D5\u10D4\u10DA\u10D8",
+    base64url: "base64url-\u10D9\u10DD\u10D3\u10D8\u10E0\u10D4\u10D1\u10E3\u10DA\u10D8 \u10D5\u10D4\u10DA\u10D8",
+    json_string: "JSON \u10D5\u10D4\u10DA\u10D8",
     e164: "E.164 \u10DC\u10DD\u10DB\u10D4\u10E0\u10D8",
     jwt: "JWT",
     template_literal: "\u10E8\u10D4\u10E7\u10D5\u10D0\u10DC\u10D0"
@@ -25955,7 +26593,7 @@ var error24 = () => {
   const TypeDictionary = {
     nan: "NaN",
     number: "\u10E0\u10D8\u10EA\u10EE\u10D5\u10D8",
-    string: "\u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8",
+    string: "\u10D5\u10D4\u10DA\u10D8",
     boolean: "\u10D1\u10E3\u10DA\u10D4\u10D0\u10DC\u10D8",
     function: "\u10E4\u10E3\u10DC\u10E5\u10EA\u10D8\u10D0",
     array: "\u10DB\u10D0\u10E1\u10D8\u10D5\u10D8"
@@ -25993,14 +26631,14 @@ var error24 = () => {
       case "invalid_format": {
         const _issue = issue3;
         if (_issue.format === "starts_with") {
-          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10D8\u10EC\u10E7\u10D4\u10D1\u10DD\u10D3\u10D4\u10E1 "${_issue.prefix}"-\u10D8\u10D7`;
+          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10D5\u10D4\u10DA\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10D8\u10EC\u10E7\u10D4\u10D1\u10DD\u10D3\u10D4\u10E1 "${_issue.prefix}"-\u10D8\u10D7`;
         }
         if (_issue.format === "ends_with")
-          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10DB\u10D7\u10D0\u10D5\u10E0\u10D3\u10D4\u10D1\u10DD\u10D3\u10D4\u10E1 "${_issue.suffix}"-\u10D8\u10D7`;
+          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10D5\u10D4\u10DA\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10DB\u10D7\u10D0\u10D5\u10E0\u10D3\u10D4\u10D1\u10DD\u10D3\u10D4\u10E1 "${_issue.suffix}"-\u10D8\u10D7`;
         if (_issue.format === "includes")
-          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D8\u10EA\u10D0\u10D5\u10D3\u10D4\u10E1 "${_issue.includes}"-\u10E1`;
+          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10D5\u10D4\u10DA\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D8\u10EA\u10D0\u10D5\u10D3\u10D4\u10E1 "${_issue.includes}"-\u10E1`;
         if (_issue.format === "regex")
-          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10E1\u10E2\u10E0\u10D8\u10DC\u10D2\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D4\u10E1\u10D0\u10D1\u10D0\u10DB\u10D4\u10D1\u10DD\u10D3\u10D4\u10E1 \u10E8\u10D0\u10D1\u10DA\u10DD\u10DC\u10E1 ${_issue.pattern}`;
+          return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 \u10D5\u10D4\u10DA\u10D8: \u10E3\u10DC\u10D3\u10D0 \u10E8\u10D4\u10D4\u10E1\u10D0\u10D1\u10D0\u10DB\u10D4\u10D1\u10DD\u10D3\u10D4\u10E1 \u10E8\u10D0\u10D1\u10DA\u10DD\u10DC\u10E1 ${_issue.pattern}`;
         return `\u10D0\u10E0\u10D0\u10E1\u10EC\u10DD\u10E0\u10D8 ${FormatDictionary[_issue.format] ?? issue3.format}`;
       }
       case "not_multiple_of":
@@ -26020,12 +26658,12 @@ var error24 = () => {
 };
 function ka_default() {
   return {
-    localeError: error24()
+    localeError: error26()
   };
 }
 
 // node_modules/zod/v4/locales/km.js
-var error25 = () => {
+var error27 = () => {
   const Sizable = {
     string: { unit: "\u178F\u17BD\u17A2\u1780\u17D2\u179F\u179A", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
     file: { unit: "\u1794\u17C3", verb: "\u1782\u17BD\u179A\u1798\u17B6\u1793" },
@@ -26131,7 +26769,7 @@ var error25 = () => {
 };
 function km_default() {
   return {
-    localeError: error25()
+    localeError: error27()
   };
 }
 
@@ -26141,7 +26779,7 @@ function kh_default() {
 }
 
 // node_modules/zod/v4/locales/ko.js
-var error26 = () => {
+var error28 = () => {
   const Sizable = {
     string: { unit: "\uBB38\uC790", verb: "to have" },
     file: { unit: "\uBC14\uC774\uD2B8", verb: "to have" },
@@ -26248,7 +26886,7 @@ var error26 = () => {
 };
 function ko_default() {
   return {
-    localeError: error26()
+    localeError: error28()
   };
 }
 
@@ -26266,7 +26904,7 @@ function getUnitTypeFromNumber(number4) {
     return "one";
   return "few";
 }
-var error27 = () => {
+var error29 = () => {
   const Sizable = {
     string: {
       unit: {
@@ -26452,12 +27090,12 @@ var error27 = () => {
 };
 function lt_default() {
   return {
-    localeError: error27()
+    localeError: error29()
   };
 }
 
 // node_modules/zod/v4/locales/mk.js
-var error28 = () => {
+var error30 = () => {
   const Sizable = {
     string: { unit: "\u0437\u043D\u0430\u0446\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
     file: { unit: "\u0431\u0430\u0458\u0442\u0438", verb: "\u0434\u0430 \u0438\u043C\u0430\u0430\u0442" },
@@ -26562,12 +27200,12 @@ var error28 = () => {
 };
 function mk_default() {
   return {
-    localeError: error28()
+    localeError: error30()
   };
 }
 
 // node_modules/zod/v4/locales/ms.js
-var error29 = () => {
+var error31 = () => {
   const Sizable = {
     string: { unit: "aksara", verb: "mempunyai" },
     file: { unit: "bait", verb: "mempunyai" },
@@ -26670,12 +27308,12 @@ var error29 = () => {
 };
 function ms_default() {
   return {
-    localeError: error29()
+    localeError: error31()
   };
 }
 
 // node_modules/zod/v4/locales/nl.js
-var error30 = () => {
+var error32 = () => {
   const Sizable = {
     string: { unit: "tekens", verb: "heeft" },
     file: { unit: "bytes", verb: "heeft" },
@@ -26781,12 +27419,12 @@ var error30 = () => {
 };
 function nl_default() {
   return {
-    localeError: error30()
+    localeError: error32()
   };
 }
 
 // node_modules/zod/v4/locales/no.js
-var error31 = () => {
+var error33 = () => {
   const Sizable = {
     string: { unit: "tegn", verb: "\xE5 ha" },
     file: { unit: "bytes", verb: "\xE5 ha" },
@@ -26890,12 +27528,12 @@ var error31 = () => {
 };
 function no_default() {
   return {
-    localeError: error31()
+    localeError: error33()
   };
 }
 
 // node_modules/zod/v4/locales/ota.js
-var error32 = () => {
+var error34 = () => {
   const Sizable = {
     string: { unit: "harf", verb: "olmal\u0131d\u0131r" },
     file: { unit: "bayt", verb: "olmal\u0131d\u0131r" },
@@ -27000,12 +27638,12 @@ var error32 = () => {
 };
 function ota_default() {
   return {
-    localeError: error32()
+    localeError: error34()
   };
 }
 
 // node_modules/zod/v4/locales/ps.js
-var error33 = () => {
+var error35 = () => {
   const Sizable = {
     string: { unit: "\u062A\u0648\u06A9\u064A", verb: "\u0648\u0644\u0631\u064A" },
     file: { unit: "\u0628\u0627\u06CC\u067C\u0633", verb: "\u0648\u0644\u0631\u064A" },
@@ -27115,12 +27753,12 @@ var error33 = () => {
 };
 function ps_default() {
   return {
-    localeError: error33()
+    localeError: error35()
   };
 }
 
 // node_modules/zod/v4/locales/pl.js
-var error34 = () => {
+var error36 = () => {
   const Sizable = {
     string: { unit: "znak\xF3w", verb: "mie\u0107" },
     file: { unit: "bajt\xF3w", verb: "mie\u0107" },
@@ -27225,12 +27863,12 @@ var error34 = () => {
 };
 function pl_default() {
   return {
-    localeError: error34()
+    localeError: error36()
   };
 }
 
 // node_modules/zod/v4/locales/pt.js
-var error35 = () => {
+var error37 = () => {
   const Sizable = {
     string: { unit: "caracteres", verb: "ter" },
     file: { unit: "bytes", verb: "ter" },
@@ -27334,7 +27972,127 @@ var error35 = () => {
 };
 function pt_default() {
   return {
-    localeError: error35()
+    localeError: error37()
+  };
+}
+
+// node_modules/zod/v4/locales/ro.js
+var error38 = () => {
+  const Sizable = {
+    string: { unit: "caractere", verb: "s\u0103 aib\u0103" },
+    file: { unit: "octe\u021Bi", verb: "s\u0103 aib\u0103" },
+    array: { unit: "elemente", verb: "s\u0103 aib\u0103" },
+    set: { unit: "elemente", verb: "s\u0103 aib\u0103" },
+    map: { unit: "intr\u0103ri", verb: "s\u0103 aib\u0103" }
+  };
+  function getSizing(origin) {
+    return Sizable[origin] ?? null;
+  }
+  const FormatDictionary = {
+    regex: "intrare",
+    email: "adres\u0103 de email",
+    url: "URL",
+    emoji: "emoji",
+    uuid: "UUID",
+    uuidv4: "UUIDv4",
+    uuidv6: "UUIDv6",
+    nanoid: "nanoid",
+    guid: "GUID",
+    cuid: "cuid",
+    cuid2: "cuid2",
+    ulid: "ULID",
+    xid: "XID",
+    ksuid: "KSUID",
+    datetime: "dat\u0103 \u0219i or\u0103 ISO",
+    date: "dat\u0103 ISO",
+    time: "or\u0103 ISO",
+    duration: "durat\u0103 ISO",
+    ipv4: "adres\u0103 IPv4",
+    ipv6: "adres\u0103 IPv6",
+    mac: "adres\u0103 MAC",
+    cidrv4: "interval IPv4",
+    cidrv6: "interval IPv6",
+    base64: "\u0219ir codat base64",
+    base64url: "\u0219ir codat base64url",
+    json_string: "\u0219ir JSON",
+    e164: "num\u0103r E.164",
+    jwt: "JWT",
+    template_literal: "intrare"
+  };
+  const TypeDictionary = {
+    nan: "NaN",
+    string: "\u0219ir",
+    number: "num\u0103r",
+    boolean: "boolean",
+    function: "func\u021Bie",
+    array: "matrice",
+    object: "obiect",
+    undefined: "nedefinit",
+    symbol: "simbol",
+    bigint: "num\u0103r mare",
+    void: "void",
+    never: "never",
+    map: "hart\u0103",
+    set: "set"
+  };
+  return (issue3) => {
+    switch (issue3.code) {
+      case "invalid_type": {
+        const expected = TypeDictionary[issue3.expected] ?? issue3.expected;
+        const receivedType = parsedType(issue3.input);
+        const received = TypeDictionary[receivedType] ?? receivedType;
+        return `Intrare invalid\u0103: a\u0219teptat ${expected}, primit ${received}`;
+      }
+      case "invalid_value":
+        if (issue3.values.length === 1)
+          return `Intrare invalid\u0103: a\u0219teptat ${stringifyPrimitive(issue3.values[0])}`;
+        return `Op\u021Biune invalid\u0103: a\u0219teptat una dintre ${joinValues(issue3.values, "|")}`;
+      case "too_big": {
+        const adj = issue3.inclusive ? "<=" : "<";
+        const sizing = getSizing(issue3.origin);
+        if (sizing)
+          return `Prea mare: a\u0219teptat ca ${issue3.origin ?? "valoarea"} ${sizing.verb} ${adj}${issue3.maximum.toString()} ${sizing.unit ?? "elemente"}`;
+        return `Prea mare: a\u0219teptat ca ${issue3.origin ?? "valoarea"} s\u0103 fie ${adj}${issue3.maximum.toString()}`;
+      }
+      case "too_small": {
+        const adj = issue3.inclusive ? ">=" : ">";
+        const sizing = getSizing(issue3.origin);
+        if (sizing) {
+          return `Prea mic: a\u0219teptat ca ${issue3.origin} ${sizing.verb} ${adj}${issue3.minimum.toString()} ${sizing.unit}`;
+        }
+        return `Prea mic: a\u0219teptat ca ${issue3.origin} s\u0103 fie ${adj}${issue3.minimum.toString()}`;
+      }
+      case "invalid_format": {
+        const _issue = issue3;
+        if (_issue.format === "starts_with") {
+          return `\u0218ir invalid: trebuie s\u0103 \xEEnceap\u0103 cu "${_issue.prefix}"`;
+        }
+        if (_issue.format === "ends_with")
+          return `\u0218ir invalid: trebuie s\u0103 se termine cu "${_issue.suffix}"`;
+        if (_issue.format === "includes")
+          return `\u0218ir invalid: trebuie s\u0103 includ\u0103 "${_issue.includes}"`;
+        if (_issue.format === "regex")
+          return `\u0218ir invalid: trebuie s\u0103 se potriveasc\u0103 cu modelul ${_issue.pattern}`;
+        return `Format invalid: ${FormatDictionary[_issue.format] ?? issue3.format}`;
+      }
+      case "not_multiple_of":
+        return `Num\u0103r invalid: trebuie s\u0103 fie multiplu de ${issue3.divisor}`;
+      case "unrecognized_keys":
+        return `Chei nerecunoscute: ${joinValues(issue3.keys, ", ")}`;
+      case "invalid_key":
+        return `Cheie invalid\u0103 \xEEn ${issue3.origin}`;
+      case "invalid_union":
+        return "Intrare invalid\u0103";
+      case "invalid_element":
+        return `Valoare invalid\u0103 \xEEn ${issue3.origin}`;
+      default:
+        return `Intrare invalid\u0103`;
+    }
+  };
+};
+function ro_default() {
+  return {
+    localeError: error38()
   };
 }
 
@@ -27354,7 +28112,7 @@ function getRussianPlural(count, one, few, many) {
   }
   return many;
 }
-var error36 = () => {
+var error39 = () => {
   const Sizable = {
     string: {
       unit: {
@@ -27491,12 +28249,12 @@ var error36 = () => {
 };
 function ru_default() {
   return {
-    localeError: error36()
+    localeError: error39()
   };
 }
 
 // node_modules/zod/v4/locales/sl.js
-var error37 = () => {
+var error40 = () => {
   const Sizable = {
     string: { unit: "znakov", verb: "imeti" },
     file: { unit: "bajtov", verb: "imeti" },
@@ -27601,12 +28359,12 @@ var error37 = () => {
 };
 function sl_default() {
   return {
-    localeError: error37()
+    localeError: error40()
   };
 }
 
 // node_modules/zod/v4/locales/sv.js
-var error38 = () => {
+var error41 = () => {
   const Sizable = {
     string: { unit: "tecken", verb: "att ha" },
     file: { unit: "bytes", verb: "att ha" },
@@ -27712,12 +28470,12 @@ var error38 = () => {
 };
 function sv_default() {
   return {
-    localeError: error38()
+    localeError: error41()
   };
 }
 
 // node_modules/zod/v4/locales/ta.js
-var error39 = () => {
+var error42 = () => {
   const Sizable = {
     string: { unit: "\u0B8E\u0BB4\u0BC1\u0BA4\u0BCD\u0BA4\u0BC1\u0B95\u0BCD\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
     file: { unit: "\u0BAA\u0BC8\u0B9F\u0BCD\u0B9F\u0BC1\u0B95\u0BB3\u0BCD", verb: "\u0B95\u0BCA\u0BA3\u0BCD\u0B9F\u0BBF\u0BB0\u0BC1\u0B95\u0BCD\u0B95 \u0BB5\u0BC7\u0BA3\u0BCD\u0B9F\u0BC1\u0BAE\u0BCD" },
@@ -27823,12 +28581,12 @@ var error39 = () => {
 };
 function ta_default() {
   return {
-    localeError: error39()
+    localeError: error42()
   };
 }
 
 // node_modules/zod/v4/locales/th.js
-var error40 = () => {
+var error43 = () => {
   const Sizable = {
     string: { unit: "\u0E15\u0E31\u0E27\u0E2D\u0E31\u0E01\u0E29\u0E23", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
     file: { unit: "\u0E44\u0E1A\u0E15\u0E4C", verb: "\u0E04\u0E27\u0E23\u0E21\u0E35" },
@@ -27934,12 +28692,12 @@ var error40 = () => {
 };
 function th_default() {
   return {
-    localeError: error40()
+    localeError: error43()
   };
 }
 
 // node_modules/zod/v4/locales/tr.js
-var error41 = () => {
+var error44 = () => {
   const Sizable = {
     string: { unit: "karakter", verb: "olmal\u0131" },
     file: { unit: "bayt", verb: "olmal\u0131" },
@@ -28040,12 +28798,12 @@ var error41 = () => {
 };
 function tr_default() {
   return {
-    localeError: error41()
+    localeError: error44()
   };
 }
 
 // node_modules/zod/v4/locales/uk.js
-var error42 = () => {
+var error45 = () => {
   const Sizable = {
     string: { unit: "\u0441\u0438\u043C\u0432\u043E\u043B\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
     file: { unit: "\u0431\u0430\u0439\u0442\u0456\u0432", verb: "\u043C\u0430\u0442\u0438\u043C\u0435" },
@@ -28149,7 +28907,7 @@ var error42 = () => {
 };
 function uk_default() {
   return {
-    localeError: error42()
+    localeError: error45()
   };
 }
 
@@ -28159,7 +28917,7 @@ function ua_default() {
 }
 
 // node_modules/zod/v4/locales/ur.js
-var error43 = () => {
+var error46 = () => {
   const Sizable = {
     string: { unit: "\u062D\u0631\u0648\u0641", verb: "\u06C1\u0648\u0646\u0627" },
     file: { unit: "\u0628\u0627\u0626\u0679\u0633", verb: "\u06C1\u0648\u0646\u0627" },
@@ -28265,17 +29023,18 @@ var error43 = () => {
 };
 function ur_default() {
   return {
-    localeError: error43()
+    localeError: error46()
   };
 }
 
 // node_modules/zod/v4/locales/uz.js
-var error44 = () => {
+var error47 = () => {
   const Sizable = {
     string: { unit: "belgi", verb: "bo\u2018lishi kerak" },
     file: { unit: "bayt", verb: "bo\u2018lishi kerak" },
     array: { unit: "element", verb: "bo\u2018lishi kerak" },
-    set: { unit: "element", verb: "bo\u2018lishi kerak" }
+    set: { unit: "element", verb: "bo\u2018lishi kerak" },
+    map: { unit: "yozuv", verb: "bo\u2018lishi kerak" }
   };
   function getSizing(origin) {
     return Sizable[origin] ?? null;
@@ -28375,12 +29134,12 @@ var error44 = () => {
 };
 function uz_default() {
   return {
-    localeError: error44()
+    localeError: error47()
   };
 }
 
 // node_modules/zod/v4/locales/vi.js
-var error45 = () => {
+var error48 = () => {
   const Sizable = {
     string: { unit: "k\xFD t\u1EF1", verb: "c\xF3" },
     file: { unit: "byte", verb: "c\xF3" },
@@ -28484,12 +29243,12 @@ var error45 = () => {
 };
 function vi_default() {
   return {
-    localeError: error45()
+    localeError: error48()
   };
 }
 
 // node_modules/zod/v4/locales/zh-CN.js
-var error46 = () => {
+var error49 = () => {
   const Sizable = {
     string: { unit: "\u5B57\u7B26", verb: "\u5305\u542B" },
     file: { unit: "\u5B57\u8282", verb: "\u5305\u542B" },
@@ -28594,12 +29353,12 @@ var error46 = () => {
 };
 function zh_CN_default() {
   return {
-    localeError: error46()
+    localeError: error49()
   };
 }
 
 // node_modules/zod/v4/locales/zh-TW.js
-var error47 = () => {
+var error50 = () => {
   const Sizable = {
     string: { unit: "\u5B57\u5143", verb: "\u64C1\u6709" },
     file: { unit: "\u4F4D\u5143\u7D44", verb: "\u64C1\u6709" },
@@ -28702,12 +29461,12 @@ var error47 = () => {
 };
 function zh_TW_default() {
   return {
-    localeError: error47()
+    localeError: error50()
   };
 }
 
 // node_modules/zod/v4/locales/yo.js
-var error48 = () => {
+var error51 = () => {
   const Sizable = {
     string: { unit: "\xE0mi", verb: "n\xED" },
     file: { unit: "bytes", verb: "n\xED" },
@@ -28810,12 +29569,12 @@ var error48 = () => {
 };
 function yo_default() {
   return {
-    localeError: error48()
+    localeError: error51()
   };
 }
 
 // node_modules/zod/v4/core/registries.js
-var _a;
+var _a2;
 var $output = /* @__PURE__ */ Symbol("ZodOutput");
 var $input = /* @__PURE__ */ Symbol("ZodInput");
 var $ZodRegistry = class {
@@ -28861,7 +29620,7 @@ var $ZodRegistry = class {
 function registry() {
   return new $ZodRegistry();
 }
-(_a = globalThis).__zod_globalRegistry ?? (_a.__zod_globalRegistry = registry());
+(_a2 = globalThis).__zod_globalRegistry ?? (_a2.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
 
 // node_modules/zod/v4/core/api.js
@@ -29779,7 +30538,7 @@ function _refine(Class2, fn, _params) {
   return schema;
 }
 // @__NO_SIDE_EFFECTS__
-function _superRefine(fn) {
+function _superRefine(fn, params) {
   const ch = /* @__PURE__ */ _check((payload) => {
     payload.addIssue = (issue3) => {
       if (typeof issue3 === "string") {
@@ -29796,7 +30555,7 @@ function _superRefine(fn) {
       }
     };
     return fn(payload.value, payload);
-  });
+  }, params);
   return ch;
 }
 // @__NO_SIDE_EFFECTS__
@@ -29926,7 +30685,7 @@ function initializeContext(params) {
   };
 }
 function process2(schema, ctx, _params = { path: [], schemaPath: [] }) {
-  var _a2;
+  var _a3;
   const def = schema._zod.def;
   const seen = ctx.seen.get(schema);
   if (seen) {
@@ -29973,8 +30732,8 @@ function process2(schema, ctx, _params = { path: [], schemaPath: [] }) {
     delete result.schema.examples;
     delete result.schema.default;
   }
-  if (ctx.io === "input" && result.schema._prefault)
-    (_a2 = result.schema).default ?? (_a2.default = result.schema._prefault);
+  if (ctx.io === "input" && "_prefault" in result.schema)
+    (_a3 = result.schema).default ?? (_a3.default = result.schema._prefault);
   delete result.schema._prefault;
   const _result = ctx.seen.get(schema);
   return _result.schema;
@@ -30155,10 +30914,15 @@ function finalize(ctx, schema) {
     result.$id = ctx.external.uri(id);
   }
   Object.assign(result, root.def ?? root.schema);
+  const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
+  if (rootMetaId !== void 0 && result.id === rootMetaId)
+    delete result.id;
   const defs = ctx.external?.defs ?? {};
   for (const entry of ctx.seen.entries()) {
     const seen = entry[1];
     if (seen.def && seen.defId) {
+      if (seen.def.id === seen.defId)
+        delete seen.def.id;
       defs[seen.defId] = seen.def;
     }
   }
@@ -30214,6 +30978,8 @@ function isTransforming(_schema, _ctx) {
     return isTransforming(def.keyType, ctx) || isTransforming(def.valueType, ctx);
   }
   if (def.type === "pipe") {
+    if (_schema._zod.traits.has("$ZodCodec"))
+      return true;
     return isTransforming(def.in, ctx) || isTransforming(def.out, ctx);
   }
   if (def.type === "object") {
@@ -30303,39 +31069,28 @@ var numberProcessor = (schema, ctx, _json, _params) => {
     json2.type = "integer";
   else
     json2.type = "number";
-  if (typeof exclusiveMinimum === "number") {
-    if (ctx.target === "draft-04" || ctx.target === "openapi-3.0") {
+  const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
+  const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
+  const legacy = ctx.target === "draft-04" || ctx.target === "openapi-3.0";
+  if (exMin) {
+    if (legacy) {
       json2.minimum = exclusiveMinimum;
       json2.exclusiveMinimum = true;
     } else {
       json2.exclusiveMinimum = exclusiveMinimum;
     }
-  }
-  if (typeof minimum === "number") {
+  } else if (typeof minimum === "number") {
     json2.minimum = minimum;
-    if (typeof exclusiveMinimum === "number" && ctx.target !== "draft-04") {
-      if (exclusiveMinimum >= minimum)
-        delete json2.minimum;
-      else
-        delete json2.exclusiveMinimum;
-    }
   }
-  if (typeof exclusiveMaximum === "number") {
-    if (ctx.target === "draft-04" || ctx.target === "openapi-3.0") {
+  if (exMax) {
+    if (legacy) {
       json2.maximum = exclusiveMaximum;
       json2.exclusiveMaximum = true;
     } else {
       json2.exclusiveMaximum = exclusiveMaximum;
     }
-  }
-  if (typeof maximum === "number") {
+  } else if (typeof maximum === "number") {
     json2.maximum = maximum;
-    if (typeof exclusiveMaximum === "number" && ctx.target !== "draft-04") {
-      if (exclusiveMaximum <= maximum)
-        delete json2.maximum;
-      else
-        delete json2.exclusiveMaximum;
-    }
   }
   if (typeof multipleOf === "number")
     json2.multipleOf = multipleOf;
@@ -30507,7 +31262,10 @@ var arrayProcessor = (schema, ctx, _json, params) => {
   if (typeof maximum === "number")
     json2.maxItems = maximum;
   json2.type = "array";
-  json2.items = process2(def.element, ctx, { ...params, path: [...params.path, "items"] });
+  json2.items = process2(def.element, ctx, {
+    ...params,
+    path: [...params.path, "items"]
+  });
 };
 var objectProcessor = (schema, ctx, _json, params) => {
   const json2 = _json;
@@ -30700,7 +31458,8 @@ var catchProcessor = (schema, ctx, json2, params) => {
 };
 var pipeProcessor = (schema, ctx, _json, params) => {
   const def = schema._zod.def;
-  const innerType = ctx.io === "input" ? def.in._zod.def.type === "transform" ? def.out : def.in : def.out;
+  const inIsTransform = def.in._zod.traits.has("$ZodTransform");
+  const innerType = ctx.io === "input" ? inIsTransform ? def.out : def.in : def.out;
   process2(innerType, ctx, params);
   const seen = ctx.seen.get(schema);
   seen.ref = innerType;
@@ -30934,6 +31693,7 @@ __export(schemas_exports2, {
   ZodOptional: () => ZodOptional,
   ZodPipe: () => ZodPipe,
   ZodPrefault: () => ZodPrefault,
+  ZodPreprocess: () => ZodPreprocess,
   ZodPromise: () => ZodPromise,
   ZodReadonly: () => ZodReadonly,
   ZodRecord: () => ZodRecord,
@@ -30994,6 +31754,7 @@ __export(schemas_exports2, {
   int32: () => int32,
   int64: () => int64,
   intersection: () => intersection,
+  invertCodec: () => invertCodec,
   ipv4: () => ipv42,
   ipv6: () => ipv62,
   json: () => json,
@@ -31163,8 +31924,8 @@ var initializer2 = (inst, issues) => {
     }
   });
 };
-var ZodError = $constructor("ZodError", initializer2);
-var ZodRealError = $constructor("ZodError", initializer2, {
+var ZodError = /* @__PURE__ */ $constructor("ZodError", initializer2);
+var ZodRealError = /* @__PURE__ */ $constructor("ZodError", initializer2, {
   Parent: Error
 });
 
@@ -31183,6 +31944,43 @@ var safeEncodeAsync2 = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync2 = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 
 // node_modules/zod/v4/classic/schemas.js
+var _installedGroups = /* @__PURE__ */ new WeakMap();
+function _installLazyMethods(inst, group, methods) {
+  const proto = Object.getPrototypeOf(inst);
+  let installed = _installedGroups.get(proto);
+  if (!installed) {
+    installed = /* @__PURE__ */ new Set();
+    _installedGroups.set(proto, installed);
+  }
+  if (installed.has(group))
+    return;
+  installed.add(group);
+  for (const key in methods) {
+    const fn = methods[key];
+    Object.defineProperty(proto, key, {
+      configurable: true,
+      enumerable: false,
+      get() {
+        const bound = fn.bind(this);
+        Object.defineProperty(this, key, {
+          configurable: true,
+          writable: true,
+          enumerable: true,
+          value: bound
+        });
+        return bound;
+      },
+      set(v) {
+        Object.defineProperty(this, key, {
+          configurable: true,
+          writable: true,
+          enumerable: true,
+          value: v
+        });
+      }
+    });
+  }
+}
 var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   $ZodType.init(inst, def);
   Object.assign(inst["~standard"], {
@@ -31195,23 +31993,6 @@ var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   inst.def = def;
   inst.type = def.type;
   Object.defineProperty(inst, "_def", { value: def });
-  inst.check = (...checks) => {
-    return inst.clone(util_exports.mergeDefs(def, {
-      checks: [
-        ...def.checks ?? [],
-        ...checks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
-      ]
-    }), {
-      parent: true
-    });
-  };
-  inst.with = inst.check;
-  inst.clone = (def2, params) => clone(inst, def2, params);
-  inst.brand = () => inst;
-  inst.register = ((reg, meta3) => {
-    reg.add(inst, meta3);
-    return inst;
-  });
   inst.parse = (data, params) => parse2(inst, data, params, { callee: inst.parse });
   inst.safeParse = (data, params) => safeParse2(inst, data, params);
   inst.parseAsync = async (data, params) => parseAsync2(inst, data, params, { callee: inst.parseAsync });
@@ -31225,45 +32006,108 @@ var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
   inst.safeDecode = (data, params) => safeDecode2(inst, data, params);
   inst.safeEncodeAsync = async (data, params) => safeEncodeAsync2(inst, data, params);
   inst.safeDecodeAsync = async (data, params) => safeDecodeAsync2(inst, data, params);
-  inst.refine = (check2, params) => inst.check(refine(check2, params));
-  inst.superRefine = (refinement) => inst.check(superRefine(refinement));
-  inst.overwrite = (fn) => inst.check(_overwrite(fn));
-  inst.optional = () => optional(inst);
-  inst.exactOptional = () => exactOptional(inst);
-  inst.nullable = () => nullable(inst);
-  inst.nullish = () => optional(nullable(inst));
-  inst.nonoptional = (params) => nonoptional(inst, params);
-  inst.array = () => array(inst);
-  inst.or = (arg) => union([inst, arg]);
-  inst.and = (arg) => intersection(inst, arg);
-  inst.transform = (tx) => pipe(inst, transform(tx));
-  inst.default = (def2) => _default2(inst, def2);
-  inst.prefault = (def2) => prefault(inst, def2);
-  inst.catch = (params) => _catch2(inst, params);
-  inst.pipe = (target) => pipe(inst, target);
-  inst.readonly = () => readonly(inst);
-  inst.describe = (description) => {
-    const cl = inst.clone();
-    globalRegistry.add(cl, { description });
-    return cl;
-  };
+  _installLazyMethods(inst, "ZodType", {
+    check(...chks) {
+      const def2 = this.def;
+      return this.clone(util_exports.mergeDefs(def2, {
+        checks: [
+          ...def2.checks ?? [],
+          ...chks.map((ch) => typeof ch === "function" ? { _zod: { check: ch, def: { check: "custom" }, onattach: [] } } : ch)
+        ]
+      }), { parent: true });
+    },
+    with(...chks) {
+      return this.check(...chks);
+    },
+    clone(def2, params) {
+      return clone(this, def2, params);
+    },
+    brand() {
+      return this;
+    },
+    register(reg, meta3) {
+      reg.add(this, meta3);
+      return this;
+    },
+    refine(check2, params) {
+      return this.check(refine(check2, params));
+    },
+    superRefine(refinement, params) {
+      return this.check(superRefine(refinement, params));
+    },
+    overwrite(fn) {
+      return this.check(_overwrite(fn));
+    },
+    optional() {
+      return optional(this);
+    },
+    exactOptional() {
+      return exactOptional(this);
+    },
+    nullable() {
+      return nullable(this);
+    },
+    nullish() {
+      return optional(nullable(this));
+    },
+    nonoptional(params) {
+      return nonoptional(this, params);
+    },
+    array() {
+      return array(this);
+    },
+    or(arg) {
+      return union([this, arg]);
+    },
+    and(arg) {
+      return intersection(this, arg);
+    },
+    transform(tx) {
+      return pipe(this, transform(tx));
+    },
+    default(d) {
+      return _default2(this, d);
+    },
+    prefault(d) {
+      return prefault(this, d);
+    },
+    catch(params) {
+      return _catch2(this, params);
+    },
+    pipe(target) {
+      return pipe(this, target);
+    },
+    readonly() {
+      return readonly(this);
+    },
+    describe(description) {
+      const cl = this.clone();
+      globalRegistry.add(cl, { description });
+      return cl;
+    },
+    meta(...args) {
+      if (args.length === 0)
+        return globalRegistry.get(this);
+      const cl = this.clone();
+      globalRegistry.add(cl, args[0]);
+      return cl;
+    },
+    isOptional() {
+      return this.safeParse(void 0).success;
+    },
+    isNullable() {
+      return this.safeParse(null).success;
+    },
+    apply(fn) {
+      return fn(this);
+    }
+  });
   Object.defineProperty(inst, "description", {
     get() {
       return globalRegistry.get(inst)?.description;
     },
     configurable: true
   });
-  inst.meta = (...args) => {
-    if (args.length === 0) {
-      return globalRegistry.get(inst);
-    }
-    const cl = inst.clone();
-    globalRegistry.add(cl, args[0]);
-    return cl;
-  };
-  inst.isOptional = () => inst.safeParse(void 0).success;
-  inst.isNullable = () => inst.safeParse(null).success;
-  inst.apply = (fn) => fn(inst);
   return inst;
 });
 var _ZodString = /* @__PURE__ */ $constructor("_ZodString", (inst, def) => {
@@ -31274,21 +32118,53 @@ var _ZodString = /* @__PURE__ */ $constructor("_ZodString", (inst, def) => {
   inst.format = bag.format ?? null;
   inst.minLength = bag.minimum ?? null;
   inst.maxLength = bag.maximum ?? null;
-  inst.regex = (...args) => inst.check(_regex(...args));
-  inst.includes = (...args) => inst.check(_includes(...args));
-  inst.startsWith = (...args) => inst.check(_startsWith(...args));
-  inst.endsWith = (...args) => inst.check(_endsWith(...args));
-  inst.min = (...args) => inst.check(_minLength(...args));
-  inst.max = (...args) => inst.check(_maxLength(...args));
-  inst.length = (...args) => inst.check(_length(...args));
-  inst.nonempty = (...args) => inst.check(_minLength(1, ...args));
-  inst.lowercase = (params) => inst.check(_lowercase(params));
-  inst.uppercase = (params) => inst.check(_uppercase(params));
-  inst.trim = () => inst.check(_trim());
-  inst.normalize = (...args) => inst.check(_normalize(...args));
-  inst.toLowerCase = () => inst.check(_toLowerCase());
-  inst.toUpperCase = () => inst.check(_toUpperCase());
-  inst.slugify = () => inst.check(_slugify());
+  _installLazyMethods(inst, "_ZodString", {
+    regex(...args) {
+      return this.check(_regex(...args));
+    },
+    includes(...args) {
+      return this.check(_includes(...args));
+    },
+    startsWith(...args) {
+      return this.check(_startsWith(...args));
+    },
+    endsWith(...args) {
+      return this.check(_endsWith(...args));
+    },
+    min(...args) {
+      return this.check(_minLength(...args));
+    },
+    max(...args) {
+      return this.check(_maxLength(...args));
+    },
+    length(...args) {
+      return this.check(_length(...args));
+    },
+    nonempty(...args) {
+      return this.check(_minLength(1, ...args));
+    },
+    lowercase(params) {
+      return this.check(_lowercase(params));
+    },
+    uppercase(params) {
+      return this.check(_uppercase(params));
+    },
+    trim() {
+      return this.check(_trim());
+    },
+    normalize(...args) {
+      return this.check(_normalize(...args));
+    },
+    toLowerCase() {
+      return this.check(_toLowerCase());
+    },
+    toUpperCase() {
+      return this.check(_toUpperCase());
+    },
+    slugify() {
+      return this.check(_slugify());
+    }
+  });
 });
 var ZodString = /* @__PURE__ */ $constructor("ZodString", (inst, def) => {
   $ZodString.init(inst, def);
@@ -31367,7 +32243,7 @@ function url(params) {
 }
 function httpUrl(params) {
   return _url(ZodURL, {
-    protocol: /^https?$/,
+    protocol: regexes_exports.httpProtocol,
     hostname: regexes_exports.domain,
     ...util_exports.normalizeParams(params)
   });
@@ -31509,21 +32385,53 @@ var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
   $ZodNumber.init(inst, def);
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json2, params) => numberProcessor(inst, ctx, json2, params);
-  inst.gt = (value, params) => inst.check(_gt(value, params));
-  inst.gte = (value, params) => inst.check(_gte(value, params));
-  inst.min = (value, params) => inst.check(_gte(value, params));
-  inst.lt = (value, params) => inst.check(_lt(value, params));
-  inst.lte = (value, params) => inst.check(_lte(value, params));
-  inst.max = (value, params) => inst.check(_lte(value, params));
-  inst.int = (params) => inst.check(int(params));
-  inst.safe = (params) => inst.check(int(params));
-  inst.positive = (params) => inst.check(_gt(0, params));
-  inst.nonnegative = (params) => inst.check(_gte(0, params));
-  inst.negative = (params) => inst.check(_lt(0, params));
-  inst.nonpositive = (params) => inst.check(_lte(0, params));
-  inst.multipleOf = (value, params) => inst.check(_multipleOf(value, params));
-  inst.step = (value, params) => inst.check(_multipleOf(value, params));
-  inst.finite = () => inst;
+  _installLazyMethods(inst, "ZodNumber", {
+    gt(value, params) {
+      return this.check(_gt(value, params));
+    },
+    gte(value, params) {
+      return this.check(_gte(value, params));
+    },
+    min(value, params) {
+      return this.check(_gte(value, params));
+    },
+    lt(value, params) {
+      return this.check(_lt(value, params));
+    },
+    lte(value, params) {
+      return this.check(_lte(value, params));
+    },
+    max(value, params) {
+      return this.check(_lte(value, params));
+    },
+    int(params) {
+      return this.check(int(params));
+    },
+    safe(params) {
+      return this.check(int(params));
+    },
+    positive(params) {
+      return this.check(_gt(0, params));
+    },
+    nonnegative(params) {
+      return this.check(_gte(0, params));
+    },
+    negative(params) {
+      return this.check(_lt(0, params));
+    },
+    nonpositive(params) {
+      return this.check(_lte(0, params));
+    },
+    multipleOf(value, params) {
+      return this.check(_multipleOf(value, params));
+    },
+    step(value, params) {
+      return this.check(_multipleOf(value, params));
+    },
+    finite() {
+      return this;
+    }
+  });
   const bag = inst._zod.bag;
   inst.minValue = Math.max(bag.minimum ?? Number.NEGATIVE_INFINITY, bag.exclusiveMinimum ?? Number.NEGATIVE_INFINITY) ?? null;
   inst.maxValue = Math.min(bag.maximum ?? Number.POSITIVE_INFINITY, bag.exclusiveMaximum ?? Number.POSITIVE_INFINITY) ?? null;
@@ -31670,11 +32578,23 @@ var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
   ZodType.init(inst, def);
   inst._zod.processJSONSchema = (ctx, json2, params) => arrayProcessor(inst, ctx, json2, params);
   inst.element = def.element;
-  inst.min = (minLength, params) => inst.check(_minLength(minLength, params));
-  inst.nonempty = (params) => inst.check(_minLength(1, params));
-  inst.max = (maxLength, params) => inst.check(_maxLength(maxLength, params));
-  inst.length = (len, params) => inst.check(_length(len, params));
-  inst.unwrap = () => inst.element;
+  _installLazyMethods(inst, "ZodArray", {
+    min(n, params) {
+      return this.check(_minLength(n, params));
+    },
+    nonempty(params) {
+      return this.check(_minLength(1, params));
+    },
+    max(n, params) {
+      return this.check(_maxLength(n, params));
+    },
+    length(n, params) {
+      return this.check(_length(n, params));
+    },
+    unwrap() {
+      return this.element;
+    }
+  });
 });
 function array(element, params) {
   return _array(ZodArray, element, params);
@@ -31690,23 +32610,47 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
   util_exports.defineLazy(inst, "shape", () => {
     return def.shape;
   });
-  inst.keyof = () => _enum2(Object.keys(inst._zod.def.shape));
-  inst.catchall = (catchall) => inst.clone({ ...inst._zod.def, catchall });
-  inst.passthrough = () => inst.clone({ ...inst._zod.def, catchall: unknown() });
-  inst.loose = () => inst.clone({ ...inst._zod.def, catchall: unknown() });
-  inst.strict = () => inst.clone({ ...inst._zod.def, catchall: never() });
-  inst.strip = () => inst.clone({ ...inst._zod.def, catchall: void 0 });
-  inst.extend = (incoming) => {
-    return util_exports.extend(inst, incoming);
-  };
-  inst.safeExtend = (incoming) => {
-    return util_exports.safeExtend(inst, incoming);
-  };
-  inst.merge = (other) => util_exports.merge(inst, other);
-  inst.pick = (mask) => util_exports.pick(inst, mask);
-  inst.omit = (mask) => util_exports.omit(inst, mask);
-  inst.partial = (...args) => util_exports.partial(ZodOptional, inst, args[0]);
-  inst.required = (...args) => util_exports.required(ZodNonOptional, inst, args[0]);
+  _installLazyMethods(inst, "ZodObject", {
+    keyof() {
+      return _enum2(Object.keys(this._zod.def.shape));
+    },
+    catchall(catchall) {
+      return this.clone({ ...this._zod.def, catchall });
+    },
+    passthrough() {
+      return this.clone({ ...this._zod.def, catchall: unknown() });
+    },
+    loose() {
+      return this.clone({ ...this._zod.def, catchall: unknown() });
+    },
+    strict() {
+      return this.clone({ ...this._zod.def, catchall: never() });
+    },
+    strip() {
+      return this.clone({ ...this._zod.def, catchall: void 0 });
+    },
+    extend(incoming) {
+      return util_exports.extend(this, incoming);
+    },
+    safeExtend(incoming) {
+      return util_exports.safeExtend(this, incoming);
+    },
+    merge(other) {
+      return util_exports.merge(this, other);
+    },
+    pick(mask) {
+      return util_exports.pick(this, mask);
+    },
+    omit(mask) {
+      return util_exports.omit(this, mask);
+    },
+    partial(...args) {
+      return util_exports.partial(ZodOptional, this, args[0]);
+    },
+    required(...args) {
+      return util_exports.required(ZodNonOptional, this, args[0]);
+    }
+  });
 });
 function object(shape, params) {
   const def = {
@@ -31811,6 +32755,14 @@ var ZodRecord = /* @__PURE__ */ $constructor("ZodRecord", (inst, def) => {
   inst.valueType = def.valueType;
 });
 function record(keyType, valueType, params) {
+  if (!valueType || !valueType._zod) {
+    return new ZodRecord({
+      type: "record",
+      keyType: string2(),
+      valueType: keyType,
+      ...util_exports.normalizeParams(valueType)
+    });
+  }
   return new ZodRecord({
     type: "record",
     keyType,
@@ -31982,10 +32934,12 @@ var ZodTransform = /* @__PURE__ */ $constructor("ZodTransform", (inst, def) => {
     if (output instanceof Promise) {
       return output.then((output2) => {
         payload.value = output2;
+        payload.fallback = true;
         return payload;
       });
     }
     payload.value = output;
+    payload.fallback = true;
     return payload;
   };
 });
@@ -32140,6 +33094,20 @@ function codec(in_, out, params) {
     reverseTransform: params.encode
   });
 }
+function invertCodec(codec2) {
+  const def = codec2._zod.def;
+  return new ZodCodec({
+    type: "pipe",
+    in: def.out,
+    out: def.in,
+    transform: def.reverseTransform,
+    reverseTransform: def.transform
+  });
+}
+var ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
+  ZodPipe.init(inst, def);
+  $ZodPreprocess.init(inst, def);
+});
 var ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
   $ZodReadonly.init(inst, def);
   ZodType.init(inst, def);
@@ -32219,8 +33187,8 @@ function custom(fn, _params) {
 function refine(fn, _params = {}) {
   return _refine(ZodCustom, fn, _params);
 }
-function superRefine(fn) {
-  return _superRefine(fn);
+function superRefine(fn, params) {
+  return _superRefine(fn, params);
 }
 var describe2 = describe;
 var meta2 = meta;
@@ -32258,7 +33226,11 @@ function json(params) {
   return jsonSchema;
 }
 function preprocess(fn, schema) {
-  return pipe(transform(fn), schema);
+  return new ZodPreprocess({
+    type: "pipe",
+    in: transform(fn),
+    out: schema
+  });
 }
 
 // node_modules/zod/v4/classic/compat.js
@@ -32679,12 +33651,6 @@ function convertBaseSchema(schema, ctx) {
     default:
       throw new Error(`Unsupported type: ${type}`);
   }
-  if (schema.description) {
-    zodSchema = zodSchema.describe(schema.description);
-  }
-  if (schema.default !== void 0) {
-    zodSchema = zodSchema.default(schema.default);
-  }
   return zodSchema;
 }
 function convertSchema(schema, ctx) {
@@ -32721,6 +33687,9 @@ function convertSchema(schema, ctx) {
   if (schema.readOnly === true) {
     baseSchema = z.readonly(baseSchema);
   }
+  if (schema.default !== void 0) {
+    baseSchema = baseSchema.default(schema.default);
+  }
   const extraMeta = {};
   const coreMetadataKeys = ["$id", "id", "$comment", "$anchor", "$vocabulary", "$dynamicRef", "$dynamicAnchor"];
   for (const key of coreMetadataKeys) {
@@ -32742,23 +33711,32 @@ function convertSchema(schema, ctx) {
   if (Object.keys(extraMeta).length > 0) {
     ctx.registry.add(baseSchema, extraMeta);
   }
+  if (schema.description) {
+    baseSchema = baseSchema.describe(schema.description);
+  }
   return baseSchema;
 }
 function fromJSONSchema(schema, params) {
   if (typeof schema === "boolean") {
     return schema ? z.any() : z.never();
   }
-  const version2 = detectVersion(schema, params?.defaultTarget);
-  const defs = schema.$defs || schema.definitions || {};
+  let normalized;
+  try {
+    normalized = JSON.parse(JSON.stringify(schema));
+  } catch {
+    throw new Error("fromJSONSchema input is not valid JSON (possibly cyclic); use $defs/$ref for recursive schemas");
+  }
+  const version2 = detectVersion(normalized, params?.defaultTarget);
+  const defs = normalized.$defs || normalized.definitions || {};
   const ctx = {
     version: version2,
     defs,
     refs: /* @__PURE__ */ new Map(),
     processing: /* @__PURE__ */ new Set(),
-    rootSchema: schema,
+    rootSchema: normalized,
     registry: params?.registry ?? globalRegistry
   };
-  return convertSchema(schema, ctx);
+  return convertSchema(normalized, ctx);
 }
 
 // node_modules/zod/v4/classic/coerce.js
@@ -32789,159 +33767,27 @@ function date4(params) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// src/schema.ts
-var OptionalBooleanSchema = external_exports.union([external_exports.string(), external_exports.boolean(), external_exports.undefined()]).transform((val) => {
-  if (val === void 0) {
-    return val;
+// node_modules/parse-domain/dist/from-url.js
+var urlPattern = /^[a-z][*+.a-z-]+:\/\//i;
+var invalidIpv6Pattern = /^([a-z][*+.a-z-]+:\/\/)([^[][^/?]*:[^/?]*:[^/?]*)(.*)/i;
+var NO_HOSTNAME = /* @__PURE__ */ Symbol("NO_HOSTNAME");
+var fromUrl = (urlLike) => {
+  if (typeof URL !== "function") {
+    throw new TypeError("Looks like the new URL() constructor is not globally available in your environment. Please make sure to use a polyfill.");
   }
-  if (val === "true" || val === true) {
-    return true;
-  } else if (val === "false" || val === false) {
-    return false;
+  if (typeof urlLike !== "string") {
+    return NO_HOSTNAME;
   }
-  throw new Error("Invalid value");
-});
-var CloudflareAccountIdSchema = external_exports.string().refine((val) => /^[a-f0-9]{32}$/.test(val), {
-  message: "cloudflareAccountId must be a 32 character hexadecimal string (lowercase a-f, 0-9). You can find this in your Cloudflare dashboard url: dash.cloudflare.com/<cloudflareAccountId>",
-  path: ["cloudflareAccountId"]
-});
-var ApiTokenSchema = external_exports.string().min(1, { message: "appwardenApiToken is required" }).min(16, {
-  message: "appwardenApiToken appears to be invalid (too short). Please check your API token."
-});
-var ConfigSchema = external_exports.object({
-  cloudflareAccountId: CloudflareAccountIdSchema,
-  appwardenApiToken: ApiTokenSchema,
-  debug: OptionalBooleanSchema.default(false)
-});
-
-// src/templates/app.ts
-var appTemplate = `
-import {
-  useContentSecurityPolicy,
-  createAppwardenMiddleware,
-} from "@appwarden/middleware/cloudflare"
-import { config } from './generated-config.mjs'
-
-export default {
-  fetch: createAppwardenMiddleware((context) => ({
-    debug: context.env.DEBUG,
-    appwardenApiToken: context.env.APPWARDEN_API_TOKEN,
-    appwardenApiHostname: context.env.APPWARDEN_API_HOSTNAME,
-    multidomainConfig: config.appwarden,
-    middleware: {
-      before: [
-        ...Object.entries(config.csp || {}).map(([hostname, cspConfig]) =>
-          useContentSecurityPolicy({
-            hostname,
-            mode: cspConfig.mode,
-            directives: cspConfig.directives,
-          })
-        ),
-      ],
-    },
-  })),
-}
-`;
-
-// src/templates/generated-config.ts
-var extractHostnamesFromConfig = (config2) => {
-  const hostnameSet = /* @__PURE__ */ new Set();
-  if (config2.appwarden) {
-    Object.keys(config2.appwarden).forEach(
-      (hostname3) => hostnameSet.add(hostname3)
-    );
+  let url2 = urlLike.startsWith("//") ? `http:${urlLike}` : (
+    // URLs that start with / do not have a hostname section
+    urlLike.startsWith("/") ? urlLike : urlPattern.test(urlLike) ? urlLike : `http://${urlLike}`
+  );
+  url2 = url2.replace(invalidIpv6Pattern, "$1[$2]$3");
+  try {
+    return new URL(url2).hostname;
+  } catch {
+    return NO_HOSTNAME;
   }
-  if (config2.csp) {
-    Object.keys(config2.csp).forEach((hostname3) => hostnameSet.add(hostname3));
-  }
-  return Array.from(hostnameSet);
-};
-var hydrateGeneratedConfig = (middlewareOptionsMap) => {
-  const config2 = {};
-  const appwardenConfig = {};
-  const cspConfig = {};
-  for (const [hostname3, options2] of middlewareOptionsMap) {
-    if (options2?.["lock-page-slug"]) {
-      appwardenConfig[hostname3] = {
-        lockPageSlug: options2["lock-page-slug"]
-      };
-    }
-    if (options2?.["csp-mode"] || options2?.["csp-directives"]) {
-      cspConfig[hostname3] = {};
-      if (options2?.["csp-mode"]) {
-        cspConfig[hostname3].mode = options2["csp-mode"];
-      }
-      if (options2?.["csp-directives"]) {
-        cspConfig[hostname3].directives = options2["csp-directives"];
-      }
-    }
-  }
-  if (Object.keys(appwardenConfig).length > 0) {
-    config2.appwarden = appwardenConfig;
-  }
-  if (Object.keys(cspConfig).length > 0) {
-    config2.csp = cspConfig;
-  }
-  const hostnames = extractHostnamesFromConfig(config2);
-  const configString = `// This file is auto-generated by @appwarden/build-cloudflare-action
-// Do not edit manually
-
-export const config = ${JSON.stringify(config2, null, 2)}
-`;
-  return { configString, hostnames };
-};
-
-// src/templates/package-json.ts
-var hydratePackageJson = (template, data) => template.replaceAll("{{VERSION}}", data.version);
-var packageJsonTemplate = `
-{
-  "name": "@appwarden/compiled-middleware",
-  "version": "{{VERSION}}",
-  "type": "module",
-  "author": "support@appwarden.io",
-  "license": "MIT",
-  "dependencies": {
-    "@appwarden/middleware": "{{VERSION}}"
-  }
-}
-`;
-
-// node_modules/parse-domain/serialized-tries/icann.js
-var icann_default = "ac>com,edu,gov,net,mil,org<ad>nom<ae>co,net,org,sch,ac,gov,mil<aero>airline,airport,accident-investigation,accident-prevention,aerobatic,aeroclub,aerodrome,agents,air-surveillance,air-traffic-control,aircraft,airtraffic,ambulance,association,author,ballooning,broker,caa,cargo,catering,certification,championship,charter,civilaviation,club,conference,consultant,consulting,control,council,crew,design,dgca,educator,emergency,engine,engineer,entertainment,equipment,exchange,express,federation,flight,freight,fuel,gliding,government,groundhandling,group,hanggliding,homebuilt,insurance,journal,journalist,leasing,logistics,magazine,maintenance,marketplace,media,microlight,modelling,navigation,parachuting,paragliding,passenger-association,pilot,press,production,recreation,repbody,res,research,rotorcraft,safety,scientist,services,show,skydiving,software,student,taxi,trader,trading,trainer,union,workinggroup,works<af>gov,com,org,net,edu<ag>com,org,net,co,nom<ai>off,com,net,org<al>com,edu,gov,mil,net,org<am>co,com,commune,net,org<ao>ed,gv,og,co,pb,it<aq,ar>bet,com,coop,edu,gob,gov,int,mil,musica,mutual,net,org,senasa,tur<arpa>e164,in-addr,ip6,iris,uri,urn<as>gov<asia,at>ac>sth<co,gv,or<au>com,net,org,edu>act,catholic,nsw>schools<nt,qld,sa,tas,vic,wa<gov>qld,sa,tas,vic,wa<asn,id,info,conf,oz,act,nsw,nt,qld,sa,tas,vic,wa<aw>com<ax,az>com,net,int,gov,org,edu,info,pp,mil,name,pro,biz<ba>com,edu,gov,mil,net,org<bb>biz,co,com,edu,gov,info,net,org,store,tv<bd>*<be>ac<bf>gov<bg>a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,0,1,2,3,4,5,6,7,8,9<bh>com,edu,net,org,gov<bi>co,com,edu,or,org<biz,bj>africa,agro,architectes,assur,avocats,co,com,eco,econo,edu,info,loisirs,money,net,org,ote,resto,restaurant,tourism,univ<bm>com,edu,gov,net,org<bn>com,edu,gov,net,org<bo>com,edu,gob,int,org,net,mil,tv,web,academia,agro,arte,blog,bolivia,ciencia,cooperativa,democracia,deporte,ecologia,economia,empresa,indigena,industria,info,medicina,movimiento,musica,natural,nombre,noticias,patria,politica,profesional,plurinacional,pueblo,revista,salud,tecnologia,tksat,transporte,wiki<br>9guacu,abc,adm,adv,agr,aju,am,anani,aparecida,app,arq,art,ato,b,barueri,belem,bhz,bib,bio,blog,bmd,boavista,bsb,campinagrande,campinas,caxias,cim,cng,cnt,com,contagem,coop,coz,cri,cuiaba,curitiba,def,des,det,dev,ecn,eco,edu,emp,enf,eng,esp,etc,eti,far,feira,flog,floripa,fm,fnd,fortal,fot,foz,fst,g12,geo,ggf,goiania,gov>ac,al,am,ap,ba,ce,df,es,go,ma,mg,ms,mt,pa,pb,pe,pi,pr,rj,rn,ro,rr,rs,sc,se,sp,to<gru,imb,ind,inf,jab,jampa,jdf,joinville,jor,jus,leg,lel,log,londrina,macapa,maceio,manaus,maringa,mat,med,mil,morena,mp,mus,natal,net,niteroi,nom>*<not,ntr,odo,ong,org,osasco,palmas,poa,ppg,pro,psc,psi,pvh,qsl,radio,rec,recife,rep,ribeirao,rio,riobranco,riopreto,salvador,sampa,santamaria,santoandre,saobernardo,saogonca,seg,sjc,slg,slz,sorocaba,srv,taxi,tc,tec,teo,the,tmp,trd,tur,tv,udi,vet,vix,vlog,wiki,zlg<bs>com,net,org,edu,gov<bt>com,edu,gov,net,org<bv,bw>co,org<by>gov,mil,com,of<bz>com,net,org,edu,gov<ca>ab,bc,mb,nb,nf,nl,ns,nt,nu,on,pe,qc,sk,yk,gc<cat,cc,cd>gov<cf,cg,ch,ci>org,or,com,co,edu,ed,ac,net,go,asso,xn--aroport-bya,int,presse,md,gouv<ck>*,!www<cl>co,gob,gov,mil<cm>co,com,gov,net<cn>ac,com,edu,gov,net,org,mil,xn--55qx5d,xn--io0a7i,xn--od0alg,ah,bj,cq,fj,gd,gs,gz,gx,ha,hb,he,hi,hl,hn,jl,js,jx,ln,nm,nx,qh,sc,sd,sh,sn,sx,tj,xj,xz,yn,zj,hk,mo,tw<co>arts,com,edu,firm,gov,info,int,mil,net,nom,org,rec,web<com,coop,cr>ac,co,ed,fi,go,or,sa<cu>com,edu,org,net,gov,inf<cv>com,edu,int,nome,org<cw>com,edu,net,org<cx>gov<cy>ac,biz,com,ekloges,gov,ltd,mil,net,org,press,pro,tm<cz,de,dj,dk,dm>com,net,org,edu,gov<do>art,com,edu,gob,gov,mil,net,org,sld,web<dz>art,asso,com,edu,gov,org,net,pol,soc,tm<ec>com,info,net,fin,k12,med,pro,org,edu,gov,gob,mil<edu,ee>edu,gov,riik,lib,med,com,pri,aip,org,fie<eg>com,edu,eun,gov,mil,name,net,org,sci<er>*<es>com,nom,org,gob,edu<et>com,gov,org,edu,biz,name,info,net<eu,fi>aland<fj>ac,biz,com,gov,info,mil,name,net,org,pro<fk>*<fm>com,edu,net,org<fo,fr>asso,com,gouv,nom,prd,tm,avoues,cci,greta,huissier-justice<ga,gb,gd>edu,gov<ge>com,edu,gov,org,mil,net,pvt<gf,gg>co,net,org<gh>com,edu,gov,org,mil<gi>com,ltd,gov,mod,edu,org<gl>co,com,edu,net,org<gm,gn>ac,com,edu,gov,org,net<gov,gp>com,net,mobi,edu,org,asso<gq,gr>com,edu,net,org,gov<gs,gt>com,edu,gob,ind,mil,net,org<gu>com,edu,gov,guam,info,net,org,web<gw,gy>co,com,edu,gov,net,org<hk>com,edu,gov,idv,net,org,xn--55qx5d,xn--wcvs22d,xn--lcvr32d,xn--mxtq1m,xn--gmqw5a,xn--ciqpn,xn--gmq050i,xn--zf0avx,xn--io0a7i,xn--mk0axi,xn--od0alg,xn--od0aq3b,xn--tn0ag,xn--uc0atv,xn--uc0ay4a<hm,hn>com,edu,org,net,mil,gob<hr>iz,from,name,com<ht>com,shop,firm,info,adult,net,pro,org,med,art,coop,pol,asso,edu,rel,gouv,perso<hu>co,info,org,priv,sport,tm,2000,agrar,bolt,casino,city,erotica,erotika,film,forum,games,hotel,ingatlan,jogasz,konyvelo,lakas,media,news,reklam,sex,shop,suli,szex,tozsde,utazas,video<id>ac,biz,co,desa,go,mil,my,net,or,ponpes,sch,web<ie>gov<il>ac,co,gov,idf,k12,muni,net,org<xn--4dbrk0ce>xn--4dbgdty6c,xn--5dbhl8d,xn--8dbq2a,xn--hebda8b<im>ac,co>ltd,plc<com,net,org,tt,tv<in>5g,6g,ac,ai,am,bihar,biz,business,ca,cn,co,com,coop,cs,delhi,dr,edu,er,firm,gen,gov,gujarat,ind,info,int,internet,io,me,mil,net,nic,org,pg,post,pro,res,travel,tv,uk,up,us<info,int>eu<io>com<iq>gov,edu,mil,com,org,net<ir>ac,co,gov,id,net,org,sch,xn--mgba3a4f16a,xn--mgba3a4fra<is>net,com,edu,gov,org,int<it>gov,edu,abr,abruzzo,aosta-valley,aostavalley,bas,basilicata,cal,calabria,cam,campania,emilia-romagna,emiliaromagna,emr,friuli-v-giulia,friuli-ve-giulia,friuli-vegiulia,friuli-venezia-giulia,friuli-veneziagiulia,friuli-vgiulia,friuliv-giulia,friulive-giulia,friulivegiulia,friulivenezia-giulia,friuliveneziagiulia,friulivgiulia,fvg,laz,lazio,lig,liguria,lom,lombardia,lombardy,lucania,mar,marche,mol,molise,piedmont,piemonte,pmn,pug,puglia,sar,sardegna,sardinia,sic,sicilia,sicily,taa,tos,toscana,trentin-sud-tirol,xn--trentin-sd-tirol-rzb,trentin-sudtirol,xn--trentin-sdtirol-7vb,trentin-sued-tirol,trentin-suedtirol,trentino-a-adige,trentino-aadige,trentino-alto-adige,trentino-altoadige,trentino-s-tirol,trentino-stirol,trentino-sud-tirol,xn--trentino-sd-tirol-c3b,trentino-sudtirol,xn--trentino-sdtirol-szb,trentino-sued-tirol,trentino-suedtirol,trentino,trentinoa-adige,trentinoaadige,trentinoalto-adige,trentinoaltoadige,trentinos-tirol,trentinostirol,trentinosud-tirol,xn--trentinosd-tirol-rzb,trentinosudtirol,xn--trentinosdtirol-7vb,trentinosued-tirol,trentinosuedtirol,trentinsud-tirol,xn--trentinsd-tirol-6vb,trentinsudtirol,xn--trentinsdtirol-nsb,trentinsued-tirol,trentinsuedtirol,tuscany,umb,umbria,val-d-aosta,val-daosta,vald-aosta,valdaosta,valle-aosta,valle-d-aosta,valle-daosta,valleaosta,valled-aosta,valledaosta,vallee-aoste,xn--valle-aoste-ebb,vallee-d-aoste,xn--valle-d-aoste-ehb,valleeaoste,xn--valleaoste-e7a,valleedaoste,xn--valledaoste-ebb,vao,vda,ven,veneto,ag,agrigento,al,alessandria,alto-adige,altoadige,an,ancona,andria-barletta-trani,andria-trani-barletta,andriabarlettatrani,andriatranibarletta,ao,aosta,aoste,ap,aq,aquila,ar,arezzo,ascoli-piceno,ascolipiceno,asti,at,av,avellino,ba,balsan-sudtirol,xn--balsan-sdtirol-nsb,balsan-suedtirol,balsan,bari,barletta-trani-andria,barlettatraniandria,belluno,benevento,bergamo,bg,bi,biella,bl,bn,bo,bologna,bolzano-altoadige,bolzano,bozen-sudtirol,xn--bozen-sdtirol-2ob,bozen-suedtirol,bozen,br,brescia,brindisi,bs,bt,bulsan-sudtirol,xn--bulsan-sdtirol-nsb,bulsan-suedtirol,bulsan,bz,ca,cagliari,caltanissetta,campidano-medio,campidanomedio,campobasso,carbonia-iglesias,carboniaiglesias,carrara-massa,carraramassa,caserta,catania,catanzaro,cb,ce,cesena-forli,xn--cesena-forl-mcb,cesenaforli,xn--cesenaforl-i8a,ch,chieti,ci,cl,cn,co,como,cosenza,cr,cremona,crotone,cs,ct,cuneo,cz,dell-ogliastra,dellogliastra,en,enna,fc,fe,fermo,ferrara,fg,fi,firenze,florence,fm,foggia,forli-cesena,xn--forl-cesena-fcb,forlicesena,xn--forlcesena-c8a,fr,frosinone,ge,genoa,genova,go,gorizia,gr,grosseto,iglesias-carbonia,iglesiascarbonia,im,imperia,is,isernia,kr,la-spezia,laquila,laspezia,latina,lc,le,lecce,lecco,li,livorno,lo,lodi,lt,lu,lucca,macerata,mantova,massa-carrara,massacarrara,matera,mb,mc,me,medio-campidano,mediocampidano,messina,mi,milan,milano,mn,mo,modena,monza-brianza,monza-e-della-brianza,monza,monzabrianza,monzaebrianza,monzaedellabrianza,ms,mt,na,naples,napoli,no,novara,nu,nuoro,og,ogliastra,olbia-tempio,olbiatempio,or,oristano,ot,pa,padova,padua,palermo,parma,pavia,pc,pd,pe,perugia,pesaro-urbino,pesarourbino,pescara,pg,pi,piacenza,pisa,pistoia,pn,po,pordenone,potenza,pr,prato,pt,pu,pv,pz,ra,ragusa,ravenna,rc,re,reggio-calabria,reggio-emilia,reggiocalabria,reggioemilia,rg,ri,rieti,rimini,rm,rn,ro,roma,rome,rovigo,sa,salerno,sassari,savona,si,siena,siracusa,so,sondrio,sp,sr,ss,suedtirol,xn--sdtirol-n2a,sv,ta,taranto,te,tempio-olbia,tempioolbia,teramo,terni,tn,to,torino,tp,tr,trani-andria-barletta,trani-barletta-andria,traniandriabarletta,tranibarlettaandria,trapani,trento,treviso,trieste,ts,turin,tv,ud,udine,urbino-pesaro,urbinopesaro,va,varese,vb,vc,ve,venezia,venice,verbania,vercelli,verona,vi,vibo-valentia,vibovalentia,vicenza,viterbo,vr,vs,vt,vv<je>co,net,org<jm>*<jo>com,org,net,edu,sch,gov,mil,name<jobs,jp>ac,ad,co,ed,go,gr,lg,ne,or,aichi>aisai,ama,anjo,asuke,chiryu,chita,fuso,gamagori,handa,hazu,hekinan,higashiura,ichinomiya,inazawa,inuyama,isshiki,iwakura,kanie,kariya,kasugai,kira,kiyosu,komaki,konan,kota,mihama,miyoshi,nishio,nisshin,obu,oguchi,oharu,okazaki,owariasahi,seto,shikatsu,shinshiro,shitara,tahara,takahama,tobishima,toei,togo,tokai,tokoname,toyoake,toyohashi,toyokawa,toyone,toyota,tsushima,yatomi<akita>akita,daisen,fujisato,gojome,hachirogata,happou,higashinaruse,honjo,honjyo,ikawa,kamikoani,kamioka,katagami,kazuno,kitaakita,kosaka,kyowa,misato,mitane,moriyoshi,nikaho,noshiro,odate,oga,ogata,semboku,yokote,yurihonjo<aomori>aomori,gonohe,hachinohe,hashikami,hiranai,hirosaki,itayanagi,kuroishi,misawa,mutsu,nakadomari,noheji,oirase,owani,rokunohe,sannohe,shichinohe,shingo,takko,towada,tsugaru,tsuruta<chiba>abiko,asahi,chonan,chosei,choshi,chuo,funabashi,futtsu,hanamigawa,ichihara,ichikawa,ichinomiya,inzai,isumi,kamagaya,kamogawa,kashiwa,katori,katsuura,kimitsu,kisarazu,kozaki,kujukuri,kyonan,matsudo,midori,mihama,minamiboso,mobara,mutsuzawa,nagara,nagareyama,narashino,narita,noda,oamishirasato,omigawa,onjuku,otaki,sakae,sakura,shimofusa,shirako,shiroi,shisui,sodegaura,sosa,tako,tateyama,togane,tohnosho,tomisato,urayasu,yachimata,yachiyo,yokaichiba,yokoshibahikari,yotsukaido<ehime>ainan,honai,ikata,imabari,iyo,kamijima,kihoku,kumakogen,masaki,matsuno,matsuyama,namikata,niihama,ozu,saijo,seiyo,shikokuchuo,tobe,toon,uchiko,uwajima,yawatahama<fukui>echizen,eiheiji,fukui,ikeda,katsuyama,mihama,minamiechizen,obama,ohi,ono,sabae,sakai,takahama,tsuruga,wakasa<fukuoka>ashiya,buzen,chikugo,chikuho,chikujo,chikushino,chikuzen,chuo,dazaifu,fukuchi,hakata,higashi,hirokawa,hisayama,iizuka,inatsuki,kaho,kasuga,kasuya,kawara,keisen,koga,kurate,kurogi,kurume,minami,miyako,miyama,miyawaka,mizumaki,munakata,nakagawa,nakama,nishi,nogata,ogori,okagaki,okawa,oki,omuta,onga,onojo,oto,saigawa,sasaguri,shingu,shinyoshitomi,shonai,soeda,sue,tachiarai,tagawa,takata,toho,toyotsu,tsuiki,ukiha,umi,usui,yamada,yame,yanagawa,yukuhashi<fukushima>aizubange,aizumisato,aizuwakamatsu,asakawa,bandai,date,fukushima,furudono,futaba,hanawa,higashi,hirata,hirono,iitate,inawashiro,ishikawa,iwaki,izumizaki,kagamiishi,kaneyama,kawamata,kitakata,kitashiobara,koori,koriyama,kunimi,miharu,mishima,namie,nango,nishiaizu,nishigo,okuma,omotego,ono,otama,samegawa,shimogo,shirakawa,showa,soma,sukagawa,taishin,tamakawa,tanagura,tenei,yabuki,yamato,yamatsuri,yanaizu,yugawa<gifu>anpachi,ena,gifu,ginan,godo,gujo,hashima,hichiso,hida,higashishirakawa,ibigawa,ikeda,kakamigahara,kani,kasahara,kasamatsu,kawaue,kitagata,mino,minokamo,mitake,mizunami,motosu,nakatsugawa,ogaki,sakahogi,seki,sekigahara,shirakawa,tajimi,takayama,tarui,toki,tomika,wanouchi,yamagata,yaotsu,yoro<gunma>annaka,chiyoda,fujioka,higashiagatsuma,isesaki,itakura,kanna,kanra,katashina,kawaba,kiryu,kusatsu,maebashi,meiwa,midori,minakami,naganohara,nakanojo,nanmoku,numata,oizumi,ora,ota,shibukawa,shimonita,shinto,showa,takasaki,takayama,tamamura,tatebayashi,tomioka,tsukiyono,tsumagoi,ueno,yoshioka<hiroshima>asaminami,daiwa,etajima,fuchu,fukuyama,hatsukaichi,higashihiroshima,hongo,jinsekikogen,kaita,kui,kumano,kure,mihara,miyoshi,naka,onomichi,osakikamijima,otake,saka,sera,seranishi,shinichi,shobara,takehara<hokkaido>abashiri,abira,aibetsu,akabira,akkeshi,asahikawa,ashibetsu,ashoro,assabu,atsuma,bibai,biei,bifuka,bihoro,biratori,chippubetsu,chitose,date,ebetsu,embetsu,eniwa,erimo,esan,esashi,fukagawa,fukushima,furano,furubira,haboro,hakodate,hamatonbetsu,hidaka,higashikagura,higashikawa,hiroo,hokuryu,hokuto,honbetsu,horokanai,horonobe,ikeda,imakane,ishikari,iwamizawa,iwanai,kamifurano,kamikawa,kamishihoro,kamisunagawa,kamoenai,kayabe,kembuchi,kikonai,kimobetsu,kitahiroshima,kitami,kiyosato,koshimizu,kunneppu,kuriyama,kuromatsunai,kushiro,kutchan,kyowa,mashike,matsumae,mikasa,minamifurano,mombetsu,moseushi,mukawa,muroran,naie,nakagawa,nakasatsunai,nakatombetsu,nanae,nanporo,nayoro,nemuro,niikappu,niki,nishiokoppe,noboribetsu,numata,obihiro,obira,oketo,okoppe,otaru,otobe,otofuke,otoineppu,oumu,ozora,pippu,rankoshi,rebun,rikubetsu,rishiri,rishirifuji,saroma,sarufutsu,shakotan,shari,shibecha,shibetsu,shikabe,shikaoi,shimamaki,shimizu,shimokawa,shinshinotsu,shintoku,shiranuka,shiraoi,shiriuchi,sobetsu,sunagawa,taiki,takasu,takikawa,takinoue,teshikaga,tobetsu,tohma,tomakomai,tomari,toya,toyako,toyotomi,toyoura,tsubetsu,tsukigata,urakawa,urausu,uryu,utashinai,wakkanai,wassamu,yakumo,yoichi<hyogo>aioi,akashi,ako,amagasaki,aogaki,asago,ashiya,awaji,fukusaki,goshiki,harima,himeji,ichikawa,inagawa,itami,kakogawa,kamigori,kamikawa,kasai,kasuga,kawanishi,miki,minamiawaji,nishinomiya,nishiwaki,ono,sanda,sannan,sasayama,sayo,shingu,shinonsen,shiso,sumoto,taishi,taka,takarazuka,takasago,takino,tamba,tatsuno,toyooka,yabu,yashiro,yoka,yokawa<ibaraki>ami,asahi,bando,chikusei,daigo,fujishiro,hitachi,hitachinaka,hitachiomiya,hitachiota,ibaraki,ina,inashiki,itako,iwama,joso,kamisu,kasama,kashima,kasumigaura,koga,miho,mito,moriya,naka,namegata,oarai,ogawa,omitama,ryugasaki,sakai,sakuragawa,shimodate,shimotsuma,shirosato,sowa,suifu,takahagi,tamatsukuri,tokai,tomobe,tone,toride,tsuchiura,tsukuba,uchihara,ushiku,yachiyo,yamagata,yawara,yuki<ishikawa>anamizu,hakui,hakusan,kaga,kahoku,kanazawa,kawakita,komatsu,nakanoto,nanao,nomi,nonoichi,noto,shika,suzu,tsubata,tsurugi,uchinada,wajima<iwate>fudai,fujisawa,hanamaki,hiraizumi,hirono,ichinohe,ichinoseki,iwaizumi,iwate,joboji,kamaishi,kanegasaki,karumai,kawai,kitakami,kuji,kunohe,kuzumaki,miyako,mizusawa,morioka,ninohe,noda,ofunato,oshu,otsuchi,rikuzentakata,shiwa,shizukuishi,sumita,tanohata,tono,yahaba,yamada<kagawa>ayagawa,higashikagawa,kanonji,kotohira,manno,marugame,mitoyo,naoshima,sanuki,tadotsu,takamatsu,tonosho,uchinomi,utazu,zentsuji<kagoshima>akune,amami,hioki,isa,isen,izumi,kagoshima,kanoya,kawanabe,kinko,kouyama,makurazaki,matsumoto,minamitane,nakatane,nishinoomote,satsumasendai,soo,tarumizu,yusui<kanagawa>aikawa,atsugi,ayase,chigasaki,ebina,fujisawa,hadano,hakone,hiratsuka,isehara,kaisei,kamakura,kiyokawa,matsuda,minamiashigara,miura,nakai,ninomiya,odawara,oi,oiso,sagamihara,samukawa,tsukui,yamakita,yamato,yokosuka,yugawara,zama,zushi<kochi>aki,geisei,hidaka,higashitsuno,ino,kagami,kami,kitagawa,kochi,mihara,motoyama,muroto,nahari,nakamura,nankoku,nishitosa,niyodogawa,ochi,okawa,otoyo,otsuki,sakawa,sukumo,susaki,tosa,tosashimizu,toyo,tsuno,umaji,yasuda,yusuhara<kumamoto>amakusa,arao,aso,choyo,gyokuto,kamiamakusa,kikuchi,kumamoto,mashiki,mifune,minamata,minamioguni,nagasu,nishihara,oguni,ozu,sumoto,takamori,uki,uto,yamaga,yamato,yatsushiro<kyoto>ayabe,fukuchiyama,higashiyama,ide,ine,joyo,kameoka,kamo,kita,kizu,kumiyama,kyotamba,kyotanabe,kyotango,maizuru,minami,minamiyamashiro,miyazu,muko,nagaokakyo,nakagyo,nantan,oyamazaki,sakyo,seika,tanabe,uji,ujitawara,wazuka,yamashina,yawata<mie>asahi,inabe,ise,kameyama,kawagoe,kiho,kisosaki,kiwa,komono,kumano,kuwana,matsusaka,meiwa,mihama,minamiise,misugi,miyama,nabari,shima,suzuka,tado,taiki,taki,tamaki,toba,tsu,udono,ureshino,watarai,yokkaichi<miyagi>furukawa,higashimatsushima,ishinomaki,iwanuma,kakuda,kami,kawasaki,marumori,matsushima,minamisanriku,misato,murata,natori,ogawara,ohira,onagawa,osaki,rifu,semine,shibata,shichikashuku,shikama,shiogama,shiroishi,tagajo,taiwa,tome,tomiya,wakuya,watari,yamamoto,zao<miyazaki>aya,ebino,gokase,hyuga,kadogawa,kawaminami,kijo,kitagawa,kitakata,kitaura,kobayashi,kunitomi,kushima,mimata,miyakonojo,miyazaki,morotsuka,nichinan,nishimera,nobeoka,saito,shiiba,shintomi,takaharu,takanabe,takazaki,tsuno<nagano>achi,agematsu,anan,aoki,asahi,azumino,chikuhoku,chikuma,chino,fujimi,hakuba,hara,hiraya,iida,iijima,iiyama,iizuna,ikeda,ikusaka,ina,karuizawa,kawakami,kiso,kisofukushima,kitaaiki,komagane,komoro,matsukawa,matsumoto,miasa,minamiaiki,minamimaki,minamiminowa,minowa,miyada,miyota,mochizuki,nagano,nagawa,nagiso,nakagawa,nakano,nozawaonsen,obuse,ogawa,okaya,omachi,omi,ookuwa,ooshika,otaki,otari,sakae,sakaki,saku,sakuho,shimosuwa,shinanomachi,shiojiri,suwa,suzaka,takagi,takamori,takayama,tateshina,tatsuno,togakushi,togura,tomi,ueda,wada,yamagata,yamanouchi,yasaka,yasuoka<nagasaki>chijiwa,futsu,goto,hasami,hirado,iki,isahaya,kawatana,kuchinotsu,matsuura,nagasaki,obama,omura,oseto,saikai,sasebo,seihi,shimabara,shinkamigoto,togitsu,tsushima,unzen<nara>ando,gose,heguri,higashiyoshino,ikaruga,ikoma,kamikitayama,kanmaki,kashiba,kashihara,katsuragi,kawai,kawakami,kawanishi,koryo,kurotaki,mitsue,miyake,nara,nosegawa,oji,ouda,oyodo,sakurai,sango,shimoichi,shimokitayama,shinjo,soni,takatori,tawaramoto,tenkawa,tenri,uda,yamatokoriyama,yamatotakada,yamazoe,yoshino<niigata>aga,agano,gosen,itoigawa,izumozaki,joetsu,kamo,kariwa,kashiwazaki,minamiuonuma,mitsuke,muika,murakami,myoko,nagaoka,niigata,ojiya,omi,sado,sanjo,seiro,seirou,sekikawa,shibata,tagami,tainai,tochio,tokamachi,tsubame,tsunan,uonuma,yahiko,yoita,yuzawa<oita>beppu,bungoono,bungotakada,hasama,hiji,himeshima,hita,kamitsue,kokonoe,kuju,kunisaki,kusu,oita,saiki,taketa,tsukumi,usa,usuki,yufu<okayama>akaiwa,asakuchi,bizen,hayashima,ibara,kagamino,kasaoka,kibichuo,kumenan,kurashiki,maniwa,misaki,nagi,niimi,nishiawakura,okayama,satosho,setouchi,shinjo,shoo,soja,takahashi,tamano,tsuyama,wake,yakage<okinawa>aguni,ginowan,ginoza,gushikami,haebaru,higashi,hirara,iheya,ishigaki,ishikawa,itoman,izena,kadena,kin,kitadaito,kitanakagusuku,kumejima,kunigami,minamidaito,motobu,nago,naha,nakagusuku,nakijin,nanjo,nishihara,ogimi,okinawa,onna,shimoji,taketomi,tarama,tokashiki,tomigusuku,tonaki,urasoe,uruma,yaese,yomitan,yonabaru,yonaguni,zamami<osaka>abeno,chihayaakasaka,chuo,daito,fujiidera,habikino,hannan,higashiosaka,higashisumiyoshi,higashiyodogawa,hirakata,ibaraki,ikeda,izumi,izumiotsu,izumisano,kadoma,kaizuka,kanan,kashiwara,katano,kawachinagano,kishiwada,kita,kumatori,matsubara,minato,minoh,misaki,moriguchi,neyagawa,nishi,nose,osakasayama,sakai,sayama,sennan,settsu,shijonawate,shimamoto,suita,tadaoka,taishi,tajiri,takaishi,takatsuki,tondabayashi,toyonaka,toyono,yao<saga>ariake,arita,fukudomi,genkai,hamatama,hizen,imari,kamimine,kanzaki,karatsu,kashima,kitagata,kitahata,kiyama,kouhoku,kyuragi,nishiarita,ogi,omachi,ouchi,saga,shiroishi,taku,tara,tosu,yoshinogari<saitama>arakawa,asaka,chichibu,fujimi,fujimino,fukaya,hanno,hanyu,hasuda,hatogaya,hatoyama,hidaka,higashichichibu,higashimatsuyama,honjo,ina,iruma,iwatsuki,kamiizumi,kamikawa,kamisato,kasukabe,kawagoe,kawaguchi,kawajima,kazo,kitamoto,koshigaya,kounosu,kuki,kumagaya,matsubushi,minano,misato,miyashiro,miyoshi,moroyama,nagatoro,namegawa,niiza,ogano,ogawa,ogose,okegawa,omiya,otaki,ranzan,ryokami,saitama,sakado,satte,sayama,shiki,shiraoka,soka,sugito,toda,tokigawa,tokorozawa,tsurugashima,urawa,warabi,yashio,yokoze,yono,yorii,yoshida,yoshikawa,yoshimi<shiga>aisho,gamo,higashiomi,hikone,koka,konan,kosei,koto,kusatsu,maibara,moriyama,nagahama,nishiazai,notogawa,omihachiman,otsu,ritto,ryuoh,takashima,takatsuki,torahime,toyosato,yasu<shimane>akagi,ama,gotsu,hamada,higashiizumo,hikawa,hikimi,izumo,kakinoki,masuda,matsue,misato,nishinoshima,ohda,okinoshima,okuizumo,shimane,tamayu,tsuwano,unnan,yakumo,yasugi,yatsuka<shizuoka>arai,atami,fuji,fujieda,fujikawa,fujinomiya,fukuroi,gotemba,haibara,hamamatsu,higashiizu,ito,iwata,izu,izunokuni,kakegawa,kannami,kawanehon,kawazu,kikugawa,kosai,makinohara,matsuzaki,minamiizu,mishima,morimachi,nishiizu,numazu,omaezaki,shimada,shimizu,shimoda,shizuoka,susono,yaizu,yoshida<tochigi>ashikaga,bato,haga,ichikai,iwafune,kaminokawa,kanuma,karasuyama,kuroiso,mashiko,mibu,moka,motegi,nasu,nasushiobara,nikko,nishikata,nogi,ohira,ohtawara,oyama,sakura,sano,shimotsuke,shioya,takanezawa,tochigi,tsuga,ujiie,utsunomiya,yaita<tokushima>aizumi,anan,ichiba,itano,kainan,komatsushima,matsushige,mima,minami,miyoshi,mugi,nakagawa,naruto,sanagochi,shishikui,tokushima,wajiki<tokyo>adachi,akiruno,akishima,aogashima,arakawa,bunkyo,chiyoda,chofu,chuo,edogawa,fuchu,fussa,hachijo,hachioji,hamura,higashikurume,higashimurayama,higashiyamato,hino,hinode,hinohara,inagi,itabashi,katsushika,kita,kiyose,kodaira,koganei,kokubunji,komae,koto,kouzushima,kunitachi,machida,meguro,minato,mitaka,mizuho,musashimurayama,musashino,nakano,nerima,ogasawara,okutama,ome,oshima,ota,setagaya,shibuya,shinagawa,shinjuku,suginami,sumida,tachikawa,taito,tama,toshima<tottori>chizu,hino,kawahara,koge,kotoura,misasa,nanbu,nichinan,sakaiminato,tottori,wakasa,yazu,yonago<toyama>asahi,fuchu,fukumitsu,funahashi,himi,imizu,inami,johana,kamiichi,kurobe,nakaniikawa,namerikawa,nanto,nyuzen,oyabe,taira,takaoka,tateyama,toga,tonami,toyama,unazuki,uozu,yamada<wakayama>arida,aridagawa,gobo,hashimoto,hidaka,hirogawa,inami,iwade,kainan,kamitonda,katsuragi,kimino,kinokawa,kitayama,koya,koza,kozagawa,kudoyama,kushimoto,mihama,misato,nachikatsuura,shingu,shirahama,taiji,tanabe,wakayama,yuasa,yura<yamagata>asahi,funagata,higashine,iide,kahoku,kaminoyama,kaneyama,kawanishi,mamurogawa,mikawa,murayama,nagai,nakayama,nanyo,nishikawa,obanazawa,oe,oguni,ohkura,oishida,sagae,sakata,sakegawa,shinjo,shirataka,shonai,takahata,tendo,tozawa,tsuruoka,yamagata,yamanobe,yonezawa,yuza<yamaguchi>abu,hagi,hikari,hofu,iwakuni,kudamatsu,mitou,nagato,oshima,shimonoseki,shunan,tabuse,tokuyama,toyota,ube,yuu<yamanashi>chuo,doshi,fuefuki,fujikawa,fujikawaguchiko,fujiyoshida,hayakawa,hokuto,ichikawamisato,kai,kofu,koshu,kosuge,minami-alps,minobu,nakamichi,nanbu,narusawa,nirasaki,nishikatsura,oshino,otsuki,showa,tabayama,tsuru,uenohara,yamanakako,yamanashi<xn--4pvxs,xn--vgu402c,xn--c3s14m,xn--f6qx53a,xn--8pvr4u,xn--uist22h,xn--djrs72d6uy,xn--mkru45i,xn--0trq7p7nn,xn--8ltr62k,xn--2m4a15e,xn--efvn9s,xn--32vp30h,xn--4it797k,xn--1lqs71d,xn--5rtp49c,xn--5js045d,xn--ehqz56n,xn--1lqs03n,xn--qqqt11m,xn--kbrq7o,xn--pssu33l,xn--ntsq17g,xn--uisz3g,xn--6btw5a,xn--1ctwo,xn--6orx2r,xn--rht61e,xn--rht27z,xn--djty4k,xn--nit225k,xn--rht3d,xn--klty5x,xn--kltx9a,xn--kltp7d,xn--uuwu58a,xn--zbx025d,xn--ntso0iqx3a,xn--elqq16h,xn--4it168d,xn--klt787d,xn--rny31h,xn--7t0a264c,xn--5rtq34k,xn--k7yn95e,xn--tor131o,xn--d5qv7z876c,kawasaki>*,!city<kitakyushu>*,!city<kobe>*,!city<nagoya>*,!city<sapporo>*,!city<sendai>*,!city<yokohama>*,!city<<ke>ac,co,go,info,me,mobi,ne,or,sc<kg>org,net,com,edu,gov,mil<kh>*<ki>edu,biz,net,org,gov,info,com<km>org,nom,gov,prd,tm,edu,mil,ass,com,coop,asso,presse,medecin,notaires,pharmaciens,veterinaire,gouv<kn>net,org,edu,gov<kp>com,edu,gov,org,rep,tra<kr>ac,co,es,go,hs,kg,mil,ms,ne,or,pe,re,sc,busan,chungbuk,chungnam,daegu,daejeon,gangwon,gwangju,gyeongbuk,gyeonggi,gyeongnam,incheon,jeju,jeonbuk,jeonnam,seoul,ulsan<kw>com,edu,emb,gov,ind,net,org<ky>com,edu,net,org<kz>org,edu,net,gov,mil,com<la>int,net,info,edu,gov,per,com,org<lb>com,edu,gov,net,org<lc>com,net,co,org,edu,gov<li,lk>gov,sch,net,int,com,org,edu,ngo,soc,web,ltd,assn,grp,hotel,ac<lr>com,edu,gov,org,net<ls>ac,biz,co,edu,gov,info,net,org,sc<lt>gov<lu,lv>com,edu,gov,org,mil,id,net,asn,conf<ly>com,net,gov,plc,edu,sch,med,org,id<ma>co,net,gov,org,ac,press<mc>tm,asso<md,me>co,net,org,edu,ac,gov,its,priv<mg>org,nom,gov,prd,tm,edu,mil,com,co<mh,mil,mk>com,org,net,edu,gov,inf,name<ml>com,edu,gouv,gov,net,org,presse<mm>*<mn>gov,edu,org<mo>com,net,org,edu,gov<mobi,mp,mq,mr>gov<ms>com,edu,gov,net,org<mt>com,edu,net,org<mu>com,net,org,gov,ac,co,or<museum,mv>aero,biz,com,coop,edu,gov,info,int,mil,museum,name,net,org,pro<mw>ac,biz,co,com,coop,edu,gov,int,museum,net,org<mx>com,org,gob,edu,net<my>biz,com,edu,gov,mil,name,net,org<mz>ac,adv,co,edu,gov,mil,net,org<na>info,pro,name,school,or,dr,us,mx,ca,in,cc,tv,ws,mobi,co,com,org<name,nc>asso,nom<ne,net,nf>com,net,per,rec,web,arts,firm,info,other,store<ng>com,edu,gov,i,mil,mobi,name,net,org,sch<ni>ac,biz,co,com,edu,gob,in,info,int,mil,net,nom,org,web<nl,no>fhs,vgs,fylkesbibl,folkebibl,museum,idrett,priv,mil,stat,dep,kommune,herad,aa>gs<ah>gs<bu>gs<fm>gs<hl>gs<hm>gs<jan-mayen>gs<mr>gs<nl>gs<nt>gs<of>gs<ol>gs<oslo>gs<rl>gs<sf>gs<st>gs<svalbard>gs<tm>gs<tr>gs<va>gs<vf>gs<akrehamn,xn--krehamn-dxa,algard,xn--lgrd-poac,arna,brumunddal,bryne,bronnoysund,xn--brnnysund-m8ac,drobak,xn--drbak-wua,egersund,fetsund,floro,xn--flor-jra,fredrikstad,hokksund,honefoss,xn--hnefoss-q1a,jessheim,jorpeland,xn--jrpeland-54a,kirkenes,kopervik,krokstadelva,langevag,xn--langevg-jxa,leirvik,mjondalen,xn--mjndalen-64a,mo-i-rana,mosjoen,xn--mosjen-eya,nesoddtangen,orkanger,osoyro,xn--osyro-wua,raholt,xn--rholt-mra,sandnessjoen,xn--sandnessjen-ogb,skedsmokorset,slattum,spjelkavik,stathelle,stavern,stjordalshalsen,xn--stjrdalshalsen-sqb,tananger,tranby,vossevangen,afjord,xn--fjord-lra,agdenes,al,xn--l-1fa,alesund,xn--lesund-hua,alstahaug,alta,xn--lt-liac,alaheadju,xn--laheadju-7ya,alvdal,amli,xn--mli-tla,amot,xn--mot-tla,andebu,andoy,xn--andy-ira,andasuolo,ardal,xn--rdal-poa,aremark,arendal,xn--s-1fa,aseral,xn--seral-lra,asker,askim,askvoll,askoy,xn--asky-ira,asnes,xn--snes-poa,audnedaln,aukra,aure,aurland,aurskog-holand,xn--aurskog-hland-jnb,austevoll,austrheim,averoy,xn--avery-yua,balestrand,ballangen,balat,xn--blt-elab,balsfjord,bahccavuotna,xn--bhccavuotna-k7a,bamble,bardu,beardu,beiarn,bajddar,xn--bjddar-pta,baidar,xn--bidr-5nac,berg,bergen,berlevag,xn--berlevg-jxa,bearalvahki,xn--bearalvhki-y4a,bindal,birkenes,bjarkoy,xn--bjarky-fya,bjerkreim,bjugn,bodo,xn--bod-2na,badaddja,xn--bdddj-mrabd,budejju,bokn,bremanger,bronnoy,xn--brnny-wuac,bygland,bykle,barum,xn--brum-voa,telemark>bo,xn--b-5ga<nordland>bo,xn--b-5ga,heroy,xn--hery-ira<bievat,xn--bievt-0qa,bomlo,xn--bmlo-gra,batsfjord,xn--btsfjord-9za,bahcavuotna,xn--bhcavuotna-s4a,dovre,drammen,drangedal,dyroy,xn--dyry-ira,donna,xn--dnna-gra,eid,eidfjord,eidsberg,eidskog,eidsvoll,eigersund,elverum,enebakk,engerdal,etne,etnedal,evenes,evenassi,xn--eveni-0qa01ga,evje-og-hornnes,farsund,fauske,fuossko,fuoisku,fedje,fet,finnoy,xn--finny-yua,fitjar,fjaler,fjell,flakstad,flatanger,flekkefjord,flesberg,flora,fla,xn--fl-zia,folldal,forsand,fosnes,frei,frogn,froland,frosta,frana,xn--frna-woa,froya,xn--frya-hra,fusa,fyresdal,forde,xn--frde-gra,gamvik,gangaviika,xn--ggaviika-8ya47h,gaular,gausdal,gildeskal,xn--gildeskl-g0a,giske,gjemnes,gjerdrum,gjerstad,gjesdal,gjovik,xn--gjvik-wua,gloppen,gol,gran,grane,granvin,gratangen,grimstad,grong,kraanghke,xn--kranghke-b0a,grue,gulen,hadsel,halden,halsa,hamar,hamaroy,habmer,xn--hbmer-xqa,hapmir,xn--hpmir-xqa,hammerfest,hammarfeasta,xn--hmmrfeasta-s4ac,haram,hareid,harstad,hasvik,aknoluokta,xn--koluokta-7ya57h,hattfjelldal,aarborte,haugesund,hemne,hemnes,hemsedal,more-og-romsdal>heroy,sande<xn--mre-og-romsdal-qqb>xn--hery-ira,sande<hitra,hjartdal,hjelmeland,hobol,xn--hobl-ira,hof,hol,hole,holmestrand,holtalen,xn--holtlen-hxa,hornindal,horten,hurdal,hurum,hvaler,hyllestad,hagebostad,xn--hgebostad-g3a,hoyanger,xn--hyanger-q1a,hoylandet,xn--hylandet-54a,ha,xn--h-2fa,ibestad,inderoy,xn--indery-fya,iveland,jevnaker,jondal,jolster,xn--jlster-bya,karasjok,karasjohka,xn--krjohka-hwab49j,karlsoy,galsa,xn--gls-elac,karmoy,xn--karmy-yua,kautokeino,guovdageaidnu,klepp,klabu,xn--klbu-woa,kongsberg,kongsvinger,kragero,xn--krager-gya,kristiansand,kristiansund,krodsherad,xn--krdsherad-m8a,kvalsund,rahkkeravju,xn--rhkkervju-01af,kvam,kvinesdal,kvinnherad,kviteseid,kvitsoy,xn--kvitsy-fya,kvafjord,xn--kvfjord-nxa,giehtavuoatna,kvanangen,xn--kvnangen-k0a,navuotna,xn--nvuotna-hwa,kafjord,xn--kfjord-iua,gaivuotna,xn--givuotna-8ya,larvik,lavangen,lavagis,loabat,xn--loabt-0qa,lebesby,davvesiida,leikanger,leirfjord,leka,leksvik,lenvik,leangaviika,xn--leagaviika-52b,lesja,levanger,lier,lierne,lillehammer,lillesand,lindesnes,lindas,xn--linds-pra,lom,loppa,lahppi,xn--lhppi-xqa,lund,lunner,luroy,xn--lury-ira,luster,lyngdal,lyngen,ivgu,lardal,lerdal,xn--lrdal-sra,lodingen,xn--ldingen-q1a,lorenskog,xn--lrenskog-54a,loten,xn--lten-gra,malvik,masoy,xn--msy-ula0h,muosat,xn--muost-0qa,mandal,marker,marnardal,masfjorden,meland,meldal,melhus,meloy,xn--mely-ira,meraker,xn--merker-kua,moareke,xn--moreke-jua,midsund,midtre-gauldal,modalen,modum,molde,moskenes,moss,mosvik,malselv,xn--mlselv-iua,malatvuopmi,xn--mlatvuopmi-s4a,namdalseid,aejrie,namsos,namsskogan,naamesjevuemie,xn--nmesjevuemie-tcba,laakesvuemie,nannestad,narvik,narviika,naustdal,nedre-eiker,akershus>nes<buskerud>nes<nesna,nesodden,nesseby,unjarga,xn--unjrga-rta,nesset,nissedal,nittedal,nord-aurdal,nord-fron,nord-odal,norddal,nordkapp,davvenjarga,xn--davvenjrga-y4a,nordre-land,nordreisa,raisa,xn--risa-5na,nore-og-uvdal,notodden,naroy,xn--nry-yla5g,notteroy,xn--nttery-byae,odda,oksnes,xn--ksnes-uua,oppdal,oppegard,xn--oppegrd-ixa,orkdal,orland,xn--rland-uua,orskog,xn--rskog-uua,orsta,xn--rsta-fra,hedmark>os,valer,xn--vler-qoa<hordaland>os<osen,osteroy,xn--ostery-fya,ostre-toten,xn--stre-toten-zcb,overhalla,ovre-eiker,xn--vre-eiker-k8a,oyer,xn--yer-zna,oygarden,xn--ygarden-p1a,oystre-slidre,xn--ystre-slidre-ujb,porsanger,porsangu,xn--porsgu-sta26f,porsgrunn,radoy,xn--rady-ira,rakkestad,rana,ruovat,randaberg,rauma,rendalen,rennebu,rennesoy,xn--rennesy-v1a,rindal,ringebu,ringerike,ringsaker,rissa,risor,xn--risr-ira,roan,rollag,rygge,ralingen,xn--rlingen-mxa,rodoy,xn--rdy-0nab,romskog,xn--rmskog-bya,roros,xn--rros-gra,rost,xn--rst-0na,royken,xn--ryken-vua,royrvik,xn--ryrvik-bya,rade,xn--rde-ula,salangen,siellak,saltdal,salat,xn--slt-elab,xn--slat-5na,samnanger,vestfold>sande<sandefjord,sandnes,sandoy,xn--sandy-yua,sarpsborg,sauda,sauherad,sel,selbu,selje,seljord,sigdal,siljan,sirdal,skaun,skedsmo,ski,skien,skiptvet,skjervoy,xn--skjervy-v1a,skierva,xn--skierv-uta,skjak,xn--skjk-soa,skodje,skanland,xn--sknland-fxa,skanit,xn--sknit-yqa,smola,xn--smla-hra,snillfjord,snasa,xn--snsa-roa,snoasa,snaase,xn--snase-nra,sogndal,sokndal,sola,solund,songdalen,sortland,spydeberg,stange,stavanger,steigen,steinkjer,stjordal,xn--stjrdal-s1a,stokke,stor-elvdal,stord,stordal,storfjord,omasvuotna,strand,stranda,stryn,sula,suldal,sund,sunndal,surnadal,sveio,svelvik,sykkylven,sogne,xn--sgne-gra,somna,xn--smna-gra,sondre-land,xn--sndre-land-0cb,sor-aurdal,xn--sr-aurdal-l8a,sor-fron,xn--sr-fron-q1a,sor-odal,xn--sr-odal-q1a,sor-varanger,xn--sr-varanger-ggb,matta-varjjat,xn--mtta-vrjjat-k7af,sorfold,xn--srfold-bya,sorreisa,xn--srreisa-q1a,sorum,xn--srum-gra,tana,deatnu,time,tingvoll,tinn,tjeldsund,dielddanuorri,tjome,xn--tjme-hra,tokke,tolga,torsken,tranoy,xn--trany-yua,tromso,xn--troms-zua,tromsa,romsa,trondheim,troandin,trysil,trana,xn--trna-woa,trogstad,xn--trgstad-r1a,tvedestrand,tydal,tynset,tysfjord,divtasvuodna,divttasvuotna,tysnes,tysvar,xn--tysvr-vra,tonsberg,xn--tnsberg-q1a,ullensaker,ullensvang,ulvik,utsira,vadso,xn--vads-jra,cahcesuolo,xn--hcesuolo-7ya35b,vaksdal,valle,vang,vanylven,vardo,xn--vard-jra,varggat,xn--vrggt-xqad,vefsn,vaapste,vega,vegarshei,xn--vegrshei-c0a,vennesla,verdal,verran,vestby,vestnes,vestre-slidre,vestre-toten,vestvagoy,xn--vestvgy-ixa6o,vevelstad,vik,vikna,vindafjord,volda,voss,varoy,xn--vry-yla5g,vagan,xn--vgan-qoa,voagat,vagsoy,xn--vgsy-qoa0j,vaga,xn--vg-yiab,ostfold>valer<xn--stfold-9xa>xn--vler-qoa<<np>*<nr>biz,info,gov,edu,org,net,com<nu,nz>ac,co,cri,geek,gen,govt,health,iwi,kiwi,maori,mil,xn--mori-qsa,net,org,parliament,school<om>co,com,edu,gov,med,museum,net,org,pro<onion,org,pa>ac,gob,com,org,sld,edu,net,ing,abo,med,nom<pe>edu,gob,nom,mil,org,com,net<pf>com,org,edu<pg>*<ph>com,net,org,gov,edu,ngo,mil,i<pk>ac,biz,com,edu,fam,gkp,gob,gog,gok,gon,gop,gos,gov,net,org,web<pl>com,net,org,aid,agro,atm,auto,biz,edu,gmina,gsm,info,mail,miasta,media,mil,nieruchomosci,nom,pc,powiat,priv,realestate,rel,sex,shop,sklep,sos,szkola,targi,tm,tourism,travel,turystyka,gov>ap,griw,ic,is,kmpsp,konsulat,kppsp,kwp,kwpsp,mup,mw,oia,oirm,oke,oow,oschr,oum,pa,pinb,piw,po,pr,psp,psse,pup,rzgw,sa,sdn,sko,so,sr,starostwo,ug,ugim,um,umig,upow,uppo,us,uw,uzs,wif,wiih,winb,wios,witd,wiw,wkz,wsa,wskr,wsse,wuoz,wzmiuw,zp,zpisdn<augustow,babia-gora,bedzin,beskidy,bialowieza,bialystok,bielawa,bieszczady,boleslawiec,bydgoszcz,bytom,cieszyn,czeladz,czest,dlugoleka,elblag,elk,glogow,gniezno,gorlice,grajewo,ilawa,jaworzno,jelenia-gora,jgora,kalisz,kazimierz-dolny,karpacz,kartuzy,kaszuby,katowice,kepno,ketrzyn,klodzko,kobierzyce,kolobrzeg,konin,konskowola,kutno,lapy,lebork,legnica,lezajsk,limanowa,lomza,lowicz,lubin,lukow,malbork,malopolska,mazowsze,mazury,mielec,mielno,mragowo,naklo,nowaruda,nysa,olawa,olecko,olkusz,olsztyn,opoczno,opole,ostroda,ostroleka,ostrowiec,ostrowwlkp,pila,pisz,podhale,podlasie,polkowice,pomorze,pomorskie,prochowice,pruszkow,przeworsk,pulawy,radom,rawa-maz,rybnik,rzeszow,sanok,sejny,slask,slupsk,sosnowiec,stalowa-wola,skoczow,starachowice,stargard,suwalki,swidnica,swiebodzin,swinoujscie,szczecin,szczytno,tarnobrzeg,tgory,turek,tychy,ustka,walbrzych,warmia,warszawa,waw,wegrow,wielun,wlocl,wloclawek,wodzislaw,wolomin,wroclaw,zachpomor,zagan,zarow,zgora,zgorzelec<pm,pn>gov,co,org,edu,net<post,pr>com,net,org,gov,edu,isla,pro,biz,info,name,est,prof,ac<pro>aaa,aca,acct,avocat,bar,cpa,eng,jur,law,med,recht<ps>edu,gov,sec,plo,com,org,net<pt>net,gov,org,edu,int,publ,com,nome<pw>co,ne,or,ed,go,belau<py>com,coop,edu,gov,mil,net,org<qa>com,edu,gov,mil,name,net,org,sch<re>asso,com,nom<ro>arts,com,firm,info,nom,nt,org,rec,store,tm,www<rs>ac,co,edu,gov,in,org<ru,rw>ac,co,coop,gov,mil,net,org<sa>com,net,org,gov,med,pub,edu,sch<sb>com,edu,gov,net,org<sc>com,gov,net,org,edu<sd>com,net,org,edu,med,tv,gov,info<se>a,ac,b,bd,brand,c,d,e,f,fh,fhsk,fhv,g,h,i,k,komforb,kommunalforbund,komvux,l,lanbib,m,n,naturbruksgymn,o,org,p,parti,pp,press,r,s,t,tm,u,w,x,y,z<sg>com,net,org,gov,edu,per<sh>com,net,gov,org,mil<si,sj,sk,sl>com,net,edu,gov,org<sm,sn>art,com,edu,gouv,org,perso,univ<so>com,edu,gov,me,net,org<sr,ss>biz,com,edu,gov,me,net,org,sch<st>co,com,consulado,edu,embaixada,mil,net,org,principe,saotome,store<su,sv>com,edu,gob,org,red<sx>gov<sy>edu,gov,net,mil,com,org<sz>co,ac,org<tc,td,tel,tf,tg,th>ac,co,go,in,mi,net,or<tj>ac,biz,co,com,edu,go,gov,int,mil,name,net,nic,org,test,web<tk,tl>gov<tm>com,co,org,net,nom,gov,mil,edu<tn>com,ens,fin,gov,ind,info,intl,mincom,nat,net,org,perso,tourism<to>com,gov,net,org,edu,mil<tr>av,bbs,bel,biz,com,dr,edu,gen,gov,info,mil,k12,kep,name,net,org,pol,tel,tsk,tv,web,nc>gov<<tt>co,com,org,net,biz,info,pro,int,coop,jobs,mobi,travel,museum,aero,name,gov,edu<tv,tw>edu,gov,mil,com,net,org,idv,game,ebiz,club,xn--zf0ao64a,xn--uc0atv,xn--czrw28b<tz>ac,co,go,hotel,info,me,mil,mobi,ne,or,sc,tv<ua>com,edu,gov,in,net,org,cherkassy,cherkasy,chernigov,chernihiv,chernivtsi,chernovtsy,ck,cn,cr,crimea,cv,dn,dnepropetrovsk,dnipropetrovsk,donetsk,dp,if,ivano-frankivsk,kh,kharkiv,kharkov,kherson,khmelnitskiy,khmelnytskyi,kiev,kirovograd,km,kr,kropyvnytskyi,krym,ks,kv,kyiv,lg,lt,lugansk,luhansk,lutsk,lv,lviv,mk,mykolaiv,nikolaev,od,odesa,odessa,pl,poltava,rivne,rovno,rv,sb,sebastopol,sevastopol,sm,sumy,te,ternopil,uz,uzhgorod,uzhhorod,vinnica,vinnytsia,vn,volyn,yalta,zakarpattia,zaporizhzhe,zaporizhzhia,zhitomir,zhytomyr,zp,zt<ug>co,or,ac,sc,go,ne,com,org<uk>ac,co,gov,ltd,me,net,nhs,org,plc,police,sch>*<<us>dni,fed,isa,kids,nsn,ak>k12,cc,lib<al>k12,cc,lib<ar>k12,cc,lib<as>k12,cc,lib<az>k12,cc,lib<ca>k12,cc,lib<co>k12,cc,lib<ct>k12,cc,lib<dc>k12,cc,lib<de>cc<fl>k12,cc,lib<ga>k12,cc,lib<gu>k12,cc,lib<hi>cc,lib<ia>k12,cc,lib<id>k12,cc,lib<il>k12,cc,lib<in>k12,cc,lib<ks>k12,cc,lib<ky>k12,cc,lib<la>k12,cc,lib<ma>k12>pvt,chtr,paroch<cc,lib<md>k12,cc,lib<me>k12,cc,lib<mi>k12,cc,lib,ann-arbor,cog,dst,eaton,gen,mus,tec,washtenaw<mn>k12,cc,lib<mo>k12,cc,lib<ms>k12,cc,lib<mt>k12,cc,lib<nc>k12,cc,lib<nd>cc,lib<ne>k12,cc,lib<nh>k12,cc,lib<nj>k12,cc,lib<nm>k12,cc,lib<nv>k12,cc,lib<ny>k12,cc,lib<oh>k12,cc,lib<ok>k12,cc,lib<or>k12,cc,lib<pa>k12,cc,lib<pr>k12,cc,lib<ri>cc,lib<sc>k12,cc,lib<sd>cc,lib<tn>k12,cc,lib<tx>k12,cc,lib<ut>k12,cc,lib<vi>k12,cc,lib<vt>k12,cc,lib<va>k12,cc,lib<wa>k12,cc,lib<wi>k12,cc,lib<wv>cc<wy>k12,cc,lib<<uy>com,edu,gub,mil,net,org<uz>co,com,net,org<va,vc>com,net,org,gov,mil,edu<ve>arts,bib,co,com,e12,edu,firm,gob,gov,info,int,mil,net,nom,org,rar,rec,store,tec,web<vg,vi>co,com,k12,net,org<vn>ac,ai,biz,com,edu,gov,health,id,info,int,io,name,net,org,pro,angiang,bacgiang,backan,baclieu,bacninh,baria-vungtau,bentre,binhdinh,binhduong,binhphuoc,binhthuan,camau,cantho,caobang,daklak,daknong,danang,dienbien,dongnai,dongthap,gialai,hagiang,haiduong,haiphong,hanam,hanoi,hatinh,haugiang,hoabinh,hungyen,khanhhoa,kiengiang,kontum,laichau,lamdong,langson,laocai,longan,namdinh,nghean,ninhbinh,ninhthuan,phutho,phuyen,quangbinh,quangnam,quangngai,quangninh,quangtri,soctrang,sonla,tayninh,thaibinh,thainguyen,thanhhoa,thanhphohochiminh,thuathienhue,tiengiang,travinh,tuyenquang,vinhlong,vinhphuc,yenbai<vu>com,edu,net,org<wf,ws>com,net,org,gov,edu<yt,xn--mgbaam7a8h,xn--y9a3aq,xn--54b7fta0cc,xn--90ae,xn--mgbcpq6gpa1a,xn--90ais,xn--fiqs8s,xn--fiqz9s,xn--lgbbat1ad8j,xn--wgbh1c,xn--e1a4c,xn--qxa6a,xn--mgbah1a3hjkrd,xn--node,xn--qxam,xn--j6w193g>xn--55qx5d,xn--wcvs22d,xn--mxtq1m,xn--gmqw5a,xn--od0alg,xn--uc0atv<xn--2scrj9c,xn--3hcrj9c,xn--45br5cyl,xn--h2breg3eve,xn--h2brj9c8c,xn--mgbgu82a,xn--rvc1e0am3e,xn--h2brj9c,xn--mgbbh1a,xn--mgbbh1a71e,xn--fpcrj9c3d,xn--gecrj9c,xn--s9brj9c,xn--45brj9c,xn--xkc2dl3a5ee0h,xn--mgba3a4f16a,xn--mgba3a4fra,xn--mgbtx2b,xn--mgbayh7gpa,xn--3e0b707e,xn--80ao21a,xn--q7ce6a,xn--fzc2c9e2c,xn--xkc2al3hye2a,xn--mgbc0a9azcg,xn--d1alf,xn--l1acc,xn--mix891f,xn--mix082f,xn--mgbx4cd0ab,xn--mgb9awbf,xn--mgbai9azgqp6j,xn--mgbai9a5eva00b,xn--ygbi2ammx,xn--90a3ac>xn--o1ac,xn--c1avg,xn--90azh,xn--d1at,xn--o1ach,xn--80au<xn--p1ai,xn--wgbl6a,xn--mgberp4a5d4ar,xn--mgberp4a5d4a87g,xn--mgbqly7c0a67fbc,xn--mgbqly7cvafr,xn--mgbpl2fh,xn--yfro4i67o,xn--clchc0ea0b2g2a9gcd,xn--ogbpf8fl,xn--mgbtf8fl,xn--o3cw4h>xn--12c1fe0br,xn--12co0c3b4eva,xn--h3cuzk1di,xn--o3cyx2a,xn--m3ch0j3a,xn--12cfi8ixb8l<xn--pgbs0dh,xn--kpry57d,xn--kprw13d,xn--nnx388a,xn--j1amh,xn--mgb2ddes,xxx,ye>com,edu,gov,net,mil,org<za>ac,agric,alt,co,edu,gov,grondar,law,mil,net,ngo,nic,nis,nom,org,school,tm,web<zm>ac,biz,co,com,edu,gov,info,mil,net,org,sch<zw>ac,co,gov,mil,org<aaa,aarp,abb,abbott,abbvie,abc,able,abogado,abudhabi,academy,accenture,accountant,accountants,aco,actor,ads,adult,aeg,aetna,afl,africa,agakhan,agency,aig,airbus,airforce,airtel,akdn,alibaba,alipay,allfinanz,allstate,ally,alsace,alstom,amazon,americanexpress,americanfamily,amex,amfam,amica,amsterdam,analytics,android,anquan,anz,aol,apartments,app,apple,aquarelle,arab,aramco,archi,army,art,arte,asda,associates,athleta,attorney,auction,audi,audible,audio,auspost,author,auto,autos,aws,axa,azure,baby,baidu,banamex,band,bank,bar,barcelona,barclaycard,barclays,barefoot,bargains,baseball,basketball,bauhaus,bayern,bbc,bbt,bbva,bcg,bcn,beats,beauty,beer,bentley,berlin,best,bestbuy,bet,bharti,bible,bid,bike,bing,bingo,bio,black,blackfriday,blockbuster,blog,bloomberg,blue,bms,bmw,bnpparibas,boats,boehringer,bofa,bom,bond,boo,book,booking,bosch,bostik,boston,bot,boutique,box,bradesco,bridgestone,broadway,broker,brother,brussels,build,builders,business,buy,buzz,bzh,cab,cafe,cal,call,calvinklein,cam,camera,camp,canon,capetown,capital,capitalone,car,caravan,cards,care,career,careers,cars,casa,case,cash,casino,catering,catholic,cba,cbn,cbre,center,ceo,cern,cfa,cfd,chanel,channel,charity,chase,chat,cheap,chintai,christmas,chrome,church,cipriani,circle,cisco,citadel,citi,citic,city,claims,cleaning,click,clinic,clinique,clothing,cloud,club,clubmed,coach,codes,coffee,college,cologne,commbank,community,company,compare,computer,comsec,condos,construction,consulting,contact,contractors,cooking,cool,corsica,country,coupon,coupons,courses,cpa,credit,creditcard,creditunion,cricket,crown,crs,cruise,cruises,cuisinella,cymru,cyou,dabur,dad,dance,data,date,dating,datsun,day,dclk,dds,deal,dealer,deals,degree,delivery,dell,deloitte,delta,democrat,dental,dentist,desi,design,dev,dhl,diamonds,diet,digital,direct,directory,discount,discover,dish,diy,dnp,docs,doctor,dog,domains,dot,download,drive,dtv,dubai,dunlop,dupont,durban,dvag,dvr,earth,eat,eco,edeka,education,email,emerck,energy,engineer,engineering,enterprises,epson,equipment,ericsson,erni,esq,estate,eurovision,eus,events,exchange,expert,exposed,express,extraspace,fage,fail,fairwinds,faith,family,fan,fans,farm,farmers,fashion,fast,fedex,feedback,ferrari,ferrero,fidelity,fido,film,final,finance,financial,fire,firestone,firmdale,fish,fishing,fit,fitness,flickr,flights,flir,florist,flowers,fly,foo,food,football,ford,forex,forsale,forum,foundation,fox,free,fresenius,frl,frogans,frontier,ftr,fujitsu,fun,fund,furniture,futbol,fyi,gal,gallery,gallo,gallup,game,games,gap,garden,gay,gbiz,gdn,gea,gent,genting,george,ggee,gift,gifts,gives,giving,glass,gle,global,globo,gmail,gmbh,gmo,gmx,godaddy,gold,goldpoint,golf,goo,goodyear,goog,google,gop,got,grainger,graphics,gratis,green,gripe,grocery,group,gucci,guge,guide,guitars,guru,hair,hamburg,hangout,haus,hbo,hdfc,hdfcbank,health,healthcare,help,helsinki,here,hermes,hiphop,hisamitsu,hitachi,hiv,hkt,hockey,holdings,holiday,homedepot,homegoods,homes,homesense,honda,horse,hospital,host,hosting,hot,hotels,hotmail,house,how,hsbc,hughes,hyatt,hyundai,ibm,icbc,ice,icu,ieee,ifm,ikano,imamat,imdb,immo,immobilien,inc,industries,infiniti,ing,ink,institute,insurance,insure,international,intuit,investments,ipiranga,irish,ismaili,ist,istanbul,itau,itv,jaguar,java,jcb,jeep,jetzt,jewelry,jio,jll,jmp,jnj,joburg,jot,joy,jpmorgan,jprs,juegos,juniper,kaufen,kddi,kerryhotels,kerrylogistics,kerryproperties,kfh,kia,kids,kim,kindle,kitchen,kiwi,koeln,komatsu,kosher,kpmg,kpn,krd,kred,kuokgroup,kyoto,lacaixa,lamborghini,lamer,lancaster,land,landrover,lanxess,lasalle,lat,latino,latrobe,law,lawyer,lds,lease,leclerc,lefrak,legal,lego,lexus,lgbt,lidl,life,lifeinsurance,lifestyle,lighting,like,lilly,limited,limo,lincoln,link,lipsy,live,living,llc,llp,loan,loans,locker,locus,lol,london,lotte,lotto,love,lpl,lplfinancial,ltd,ltda,lundbeck,luxe,luxury,madrid,maif,maison,makeup,man,management,mango,map,market,marketing,markets,marriott,marshalls,mattel,mba,mckinsey,med,media,meet,melbourne,meme,memorial,men,menu,merckmsd,miami,microsoft,mini,mint,mit,mitsubishi,mlb,mls,mma,mobile,moda,moe,moi,mom,monash,money,monster,mormon,mortgage,moscow,moto,motorcycles,mov,movie,msd,mtn,mtr,music,nab,nagoya,navy,nba,nec,netbank,netflix,network,neustar,new,news,next,nextdirect,nexus,nfl,ngo,nhk,nico,nike,nikon,ninja,nissan,nissay,nokia,norton,now,nowruz,nowtv,nra,nrw,ntt,nyc,obi,observer,office,okinawa,olayan,olayangroup,ollo,omega,one,ong,onl,online,ooo,open,oracle,orange,organic,origins,osaka,otsuka,ott,ovh,page,panasonic,paris,pars,partners,parts,party,pay,pccw,pet,pfizer,pharmacy,phd,philips,phone,photo,photography,photos,physio,pics,pictet,pictures,pid,pin,ping,pink,pioneer,pizza,place,play,playstation,plumbing,plus,pnc,pohl,poker,politie,porn,pramerica,praxi,press,prime,prod,productions,prof,progressive,promo,properties,property,protection,pru,prudential,pub,pwc,qpon,quebec,quest,racing,radio,read,realestate,realtor,realty,recipes,red,redstone,redumbrella,rehab,reise,reisen,reit,reliance,ren,rent,rentals,repair,report,republican,rest,restaurant,review,reviews,rexroth,rich,richardli,ricoh,ril,rio,rip,rocks,rodeo,rogers,room,rsvp,rugby,ruhr,run,rwe,ryukyu,saarland,safe,safety,sakura,sale,salon,samsclub,samsung,sandvik,sandvikcoromant,sanofi,sap,sarl,sas,save,saxo,sbi,sbs,scb,schaeffler,schmidt,scholarships,school,schule,schwarz,science,scot,search,seat,secure,security,seek,select,sener,services,seven,sew,sex,sexy,sfr,shangrila,sharp,shell,shia,shiksha,shoes,shop,shopping,shouji,show,silk,sina,singles,site,ski,skin,sky,skype,sling,smart,smile,sncf,soccer,social,softbank,software,sohu,solar,solutions,song,sony,soy,spa,space,sport,spot,srl,stada,staples,star,statebank,statefarm,stc,stcgroup,stockholm,storage,store,stream,studio,study,style,sucks,supplies,supply,support,surf,surgery,suzuki,swatch,swiss,sydney,systems,tab,taipei,talk,taobao,target,tatamotors,tatar,tattoo,tax,taxi,tci,tdk,team,tech,technology,temasek,tennis,teva,thd,theater,theatre,tiaa,tickets,tienda,tips,tires,tirol,tjmaxx,tjx,tkmaxx,tmall,today,tokyo,tools,top,toray,toshiba,total,tours,town,toyota,toys,trade,trading,training,travel,travelers,travelersinsurance,trust,trv,tube,tui,tunes,tushu,tvs,ubank,ubs,unicom,university,uno,uol,ups,vacations,vana,vanguard,vegas,ventures,verisign,versicherung,vet,viajes,video,vig,viking,villas,vin,vip,virgin,visa,vision,viva,vivo,vlaanderen,vodka,volvo,vote,voting,voto,voyage,wales,walmart,walter,wang,wanggou,watch,watches,weather,weatherchannel,webcam,weber,website,wed,wedding,weibo,weir,whoswho,wien,wiki,williamhill,win,windows,wine,winners,wme,wolterskluwer,woodside,work,works,world,wow,wtc,wtf,xbox,xerox,xihuan,xin,xn--11b4c3d,xn--1ck2e1b,xn--1qqw23a,xn--30rr7y,xn--3bst00m,xn--3ds443g,xn--3pxu8k,xn--42c2d9a,xn--45q11c,xn--4gbrim,xn--55qw42g,xn--55qx5d,xn--5su34j936bgsg,xn--5tzm5g,xn--6frz82g,xn--6qq986b3xl,xn--80adxhks,xn--80aqecdr1a,xn--80asehdb,xn--80aswg,xn--8y0a063a,xn--9dbq2a,xn--9et52u,xn--9krt00a,xn--b4w605ferd,xn--bck1b9a5dre4c,xn--c1avg,xn--c2br7g,xn--cck2b3b,xn--cckwcxetd,xn--cg4bki,xn--czr694b,xn--czrs0t,xn--czru2d,xn--d1acj3b,xn--eckvdtc9d,xn--efvy88h,xn--fct429k,xn--fhbei,xn--fiq228c5hs,xn--fiq64b,xn--fjq720a,xn--flw351e,xn--fzys8d69uvgm,xn--g2xx48c,xn--gckr3f0f,xn--gk3at1e,xn--hxt814e,xn--i1b6b1a6a2e,xn--imr513n,xn--io0a7i,xn--j1aef,xn--jlq480n2rg,xn--jvr189m,xn--kcrx77d1x4a,xn--kput3i,xn--mgba3a3ejt,xn--mgba7c0bbn0a,xn--mgbab2bd,xn--mgbca7dzdo,xn--mgbi4ecexp,xn--mgbt3dhd,xn--mk1bu44c,xn--mxtq1m,xn--ngbc5azd,xn--ngbe9e0a,xn--ngbrx,xn--nqv7f,xn--nqv7fs00ema,xn--nyqy26a,xn--otu796d,xn--p1acf,xn--pssy2u,xn--q9jyb4c,xn--qcka1pmc,xn--rhqv96g,xn--rovu88b,xn--ses554g,xn--t60b56a,xn--tckwe,xn--tiq49xqyj,xn--unup4y,xn--vermgensberater-ctb,xn--vermgensberatung-pwb,xn--vhquv,xn--vuq861b,xn--w4r85el8fhu5dnra,xn--w4rs40l,xn--xhq521b,xn--zfr164b,xyz,yachts,yahoo,yamaxun,yandex,yodobashi,yoga,yokohama,you,youtube,yun,zappos,zara,zero,zip,zone,zuerich";
-
-// node_modules/parse-domain/serialized-tries/private.js
-var private_default = "krd>co,edu<pl>art,gliwice,krakow,poznan,wroc,zakopane,beep,ecommerce-shop,cfolks,dfirma,dkonto,you2,shoparena,homesklep,sdscloud,unicloud,krasnik,leczna,lubartow,lublin,poniatowa,swidnik,co,torun,simplesite,myspreadshop,gda,gdansk,gdynia,med,sopot,bielsko<us>de>lib<cloudns,drud,is-by,land-4-sale,stuff-4-sale,heliohost,enscaled>phx<mircloud,ngo,golffan,noip,pointto,freeddns,srv>gh,gl<platterp,servername<dev>12chars,panel,autocode,lcl>*<lclstage>*<stg>*<stgstage>*<pages,r2,workers,curv,deno,deno-staging,deta,evervault>relay<fly,githubpreview,gateway>*<is-a,iserv,runcontainers,localcert>user>*<<loginline,barsy,mediatech,modx,ngrok,ngrok-free,is-cool,is-not-a,localplayer,xmit,platter-app,replit>archer,bones,canary,global,hacker,id,janeway,kim,kira,kirk,odo,paris,picard,pike,prerelease,reed,riker,sisko,spock,staging,sulu,tarpit,teams,tucker,wesley,worf<crm>d>*<w>*<wa>*<wb>*<wc>*<wd>*<we>*<wf>*<<vercel,webhare>*<<it>12chars,blogspot,ibxos,iliadboxos,neen>jc<tim>open>jelastic>cloud<<<16-b,32-b,64-b,123homepage,myspreadshop,syncloud<pro>12chars,cloudns,dnstrace>bci<barsy,ngrok<ua>cc,inf,ltd,cx,ie,biz,co,pp,v<to>611,oya,x0,quickconnect>direct<vpnplus<com>a2hosted,cpserver,adobeaemcloud>dev>*<<africa,airkitapps,airkitapps-au,aivencloud,kasserver,amazonaws>af-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-northeast-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-northeast-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-northeast-3>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-south-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<ap-southeast-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-southeast-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-southeast-3>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<ap-southeast-4>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<ca-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ca-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<eu-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-central-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<eu-north-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-south-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<eu-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-deprecated,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-west-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-west-3>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<il-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs<<me-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<me-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<sa-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-deprecated,s3-fips,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-east-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips<s3,s3-accesspoint,s3-accesspoint-fips,s3-deprecated,s3-fips,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-gov-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website<us-gov-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website<us-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-west-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-deprecated,s3-fips,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<compute>*<compute-1>*<airflow>af-south-1>*<ap-east-1>*<ap-northeast-1>*<ap-northeast-2>*<ap-northeast-3>*<ap-south-1>*<ap-south-2>*<ap-southeast-1>*<ap-southeast-2>*<ap-southeast-3>*<ap-southeast-4>*<ca-central-1>*<ca-west-1>*<eu-central-1>*<eu-central-2>*<eu-north-1>*<eu-south-1>*<eu-south-2>*<eu-west-1>*<eu-west-2>*<eu-west-3>*<il-central-1>*<me-central-1>*<me-south-1>*<sa-east-1>*<us-east-1>*<us-east-2>*<us-west-1>*<us-west-2>*<<s3,s3-1,s3-ap-east-1,s3-ap-northeast-1,s3-ap-northeast-2,s3-ap-northeast-3,s3-ap-south-1,s3-ap-southeast-1,s3-ap-southeast-2,s3-ca-central-1,s3-eu-central-1,s3-eu-north-1,s3-eu-west-1,s3-eu-west-2,s3-eu-west-3,s3-external-1,s3-fips-us-gov-east-1,s3-fips-us-gov-west-1,s3-global>accesspoint>mrap<<s3-me-south-1,s3-sa-east-1,s3-us-east-2,s3-us-gov-east-1,s3-us-gov-west-1,s3-us-west-1,s3-us-west-2,s3-website-ap-northeast-1,s3-website-ap-southeast-1,s3-website-ap-southeast-2,s3-website-eu-west-1,s3-website-sa-east-1,s3-website-us-east-1,s3-website-us-gov-west-1,s3-website-us-west-1,s3-website-us-west-2,elb>*<<amazoncognito>af-south-1>auth<ap-east-1>auth<ap-northeast-1>auth<ap-northeast-2>auth<ap-northeast-3>auth<ap-south-1>auth<ap-south-2>auth<ap-southeast-1>auth<ap-southeast-2>auth<ap-southeast-3>auth<ap-southeast-4>auth<ca-central-1>auth<ca-west-1>auth<eu-central-1>auth<eu-central-2>auth<eu-north-1>auth<eu-south-1>auth<eu-south-2>auth<eu-west-1>auth<eu-west-2>auth<eu-west-3>auth<il-central-1>auth<me-central-1>auth<me-south-1>auth<sa-east-1>auth<us-east-1>auth,auth-fips<us-east-2>auth,auth-fips<us-gov-west-1>auth-fips<us-west-1>auth,auth-fips<us-west-2>auth,auth-fips<<amplifyapp,awsapprunner>*<awsapps,elasticbeanstalk>af-south-1,ap-east-1,ap-northeast-1,ap-northeast-2,ap-northeast-3,ap-south-1,ap-southeast-1,ap-southeast-2,ap-southeast-3,ca-central-1,eu-central-1,eu-north-1,eu-south-1,eu-west-1,eu-west-2,eu-west-3,il-central-1,me-south-1,sa-east-1,us-east-1,us-east-2,us-gov-east-1,us-gov-west-1,us-west-1,us-west-2<awsglobalaccelerator,siiites,appspacehosted,appspaceusercontent,on-aptible,myasustor,balena-devices,betainabox,boutir,bplaced,cafjs,canva-apps,cdn77-storage,br,cn,de,eu,jpn,mex,ru,sa,uk,us,za,clever-cloud>services>*<<dnsabr,jdevcloud,wpdevcloud,cf-ipfs,cloudflare-ipfs,trycloudflare,co,customer-oci>*,oci>*<ocp>*<ocs>*<<builtwithdark,datadetect>demo,instance<dattolocal,dattorelay,dattoweb,mydatto,ddns5,digitaloceanspaces>*<discordsays,discordsez,drayddns,dreamhosters,durumis,mydrobo,blogdns,cechire,dnsalias,dnsdojo,doesntexist,dontexist,doomdns,dyn-o-saur,dynalias,dyndns-at-home,dyndns-at-work,dyndns-blog,dyndns-free,dyndns-home,dyndns-ip,dyndns-mail,dyndns-office,dyndns-pics,dyndns-remote,dyndns-server,dyndns-web,dyndns-wiki,dyndns-work,est-a-la-maison,est-a-la-masion,est-le-patron,est-mon-blogueur,from-ak,from-al,from-ar,from-ca,from-ct,from-dc,from-de,from-fl,from-ga,from-hi,from-ia,from-id,from-il,from-in,from-ks,from-ky,from-ma,from-md,from-mi,from-mn,from-mo,from-ms,from-mt,from-nc,from-nd,from-ne,from-nh,from-nj,from-nm,from-nv,from-oh,from-ok,from-or,from-pa,from-pr,from-ri,from-sc,from-sd,from-tn,from-tx,from-ut,from-va,from-vt,from-wa,from-wi,from-wv,from-wy,getmyip,gotdns,hobby-site,homelinux,homeunix,iamallama,is-a-anarchist,is-a-blogger,is-a-bookkeeper,is-a-bulls-fan,is-a-caterer,is-a-chef,is-a-conservative,is-a-cpa,is-a-cubicle-slave,is-a-democrat,is-a-designer,is-a-doctor,is-a-financialadvisor,is-a-geek,is-a-green,is-a-guru,is-a-hard-worker,is-a-hunter,is-a-landscaper,is-a-lawyer,is-a-liberal,is-a-libertarian,is-a-llama,is-a-musician,is-a-nascarfan,is-a-nurse,is-a-painter,is-a-personaltrainer,is-a-photographer,is-a-player,is-a-republican,is-a-rockstar,is-a-socialist,is-a-student,is-a-teacher,is-a-techie,is-a-therapist,is-an-accountant,is-an-actor,is-an-actress,is-an-anarchist,is-an-artist,is-an-engineer,is-an-entertainer,is-certified,is-gone,is-into-anime,is-into-cars,is-into-cartoons,is-into-games,is-leet,is-not-certified,is-slick,is-uberleet,is-with-theband,isa-geek,isa-hockeynut,issmarterthanyou,likes-pie,likescandy,neat-url,saves-the-whales,selfip,sells-for-less,sells-for-u,servebbs,simple-url,space-to-rent,teaches-yoga,writesthisblog,ddnsfree,ddnsgeek,giize,gleeze,kozow,loseyourip,ooguy,theworkpc,mytuleap,tuleap-partners,encoreapi,evennode>eu-1,eu-2,eu-3,eu-4,us-1,us-2,us-3,us-4<onfabrica,fastly-edge,fastly-terrarium,fastvps-server,mydobiss,firebaseapp,fldrv,forgeblocks,framercanvas,freebox-os,freeboxos,freemyip,aliases121,gentapps,gentlentapis,githubusercontent,0emm>*<appspot>r>*<<blogspot,codespot,googleapis,googlecode,pagespeedmobilizer,publishproxy,withgoogle,withyoutube,grayjayleagues,hatenablog,hatenadiary,herokuapp,herokussl,gr,smushcdn,wphostedmail,wpmucdn,pixolino,apps-1and1,live-website,amscompute,dopaas,hosted-by-previder>paas<hosteur>rag-cloud,rag-cloud-ch<ik-server>jcloud,jcloud-ver-jpc<jelastic>demo<kilatiron,massivegrid>paas<wafaicloud>jed,lon,ryd<webadorsite,joyent>cns>*<<ktistory,lpusercontent,linode>members,nodebalancer>*<<linodeobjects>*<linodeusercontent>ip<barsycenter,barsyonline,mazeplay,miniserver,atmeta,fbsbx>apps<meteorapp>eu<hostedpi,mythic-beasts>caracal,customer,fentiger,lynx,ocelot,oncilla,onza,sphinx,vs,x,yali<nospamproxy>cloud<4u,nfshost,ar,hu,kr,no,qc,uy,3utilities,blogsyte,ciscofreak,damnserver,ddnsking,ditchyourip,dnsiskinky,dynns,geekgalaxy,health-carereform,homesecuritymac,homesecuritypc,myactivedirectory,mysecuritycamera,myvnc,net-freaks,onthewifi,point2this,quicksytes,securitytactics,servebeer,servecounterstrike,serveexchange,serveftp,servegame,servehalflife,servehttp,servehumour,serveirc,servemp3,servep2p,servepics,servequake,servesarcasm,stufftoread,unusualperson,workisboring,001www,ddnslive,myiphost,observableusercontent>static<simplesite,orsites,operaunite,authgear-staging,authgearapps,skygearapp,outsystemscloud,ownprovider,pgfog,pagexl,gotpantheon,paywhirl>*<upsunapp,platter-app,postman-echo,prgmr>xen<pythonanywhere>eu<qa2,alpha-myqnapcloud,dev-myqnapcloud,mycloudnas,mynascloud,myqnapcloud,qualifioapp,ladesk,qbuser,quipelements>*<rackmaze,rhcloud,onrender,render>app<180r,dojin,sakuratan,sakuraweb,x0,code>builder>*<dev-builder>*<stg-builder>*<<salesforce>platform>code-builder-stg>test>001>*<<<<<logoip,scrysec,firewall-gateway,myshopblocks,myshopify,shopitsite,1kapp,appchizi,applinzi,sinaapp,vipsinaapp,bounty-full>alpha,beta<streamlitapp,try-snowplow,playstation-cloud,myspreadshop,w-corp-staticblitz,w-credentialless-staticblitz,w-staticblitz,stackhero-network,stdlib>api<strapiapp>media<streak-link,streaklinks,streakusercontent,temp-dns,dsmynas,familyds,mytabit,tb-hosting>site<reservd,thingdustdata,bloxcms,townnews-staging,typeform>pro<hk,it,vultrobjects>*<wafflecell,hotelwithflight,reserve-online,cprapid,pleskns,remotewd,wiardweb>pages<wixsite,wixstudio,messwithdns,woltlab-demo,wpenginepowered>js<xnbay>u2,u2-local<yolasite<vodka>aaa<io>on-acorn>*<apigee,b-data,banzaicloud>app,backyards>*<<beagleboard,bitbucket,bluebite,boxfuse,brave>s>*<<browsersafetymark,bigv>uk0<cleverapps,dappnode>dyndns<darklang,definima,dedyn,drud,fh-muenster,shw,forgerock>id<github,gitlab,lolipop,hasura-app,hostyhosting,hypernode,moonscale>*<beebyte>paas<beebyteapp>sekd1<jele,unispace>cloud-fr1<webthings,loginline,barsy,azurecontainer>*<ngrok>ap,au,eu,in,jp,sa,us<nodeart>stage<pantheonsite,dyn53,pstmn>mock<protonet,qcx>sys>*<<qoto,vaporcloud,myrdbx,rb-hosting>site<on-k3s>*<on-rio>*<readthedocs,resindevice,resinstaging>devices<hzc,sandcats,scrypted>client<shiftedit,mo-siemens,lair>apps<stolos>*<spacekit,musician,utwente,s5y>*<edugit,telebit,thingdust>dev>cust,reservd<disrec>cust,reservd<prod>cust<testing>cust,reservd<<tickets,upli,2038,webflow,webflowtest,editorx,wixstudio,basicserver,virtualserver<biz>activetrail,cloudns,jozi,dyndns,for-better,for-more,for-some,for-the,selfip,webhop,orx,mmafan,myftp,no-ip,dscloud<app>adaptable,beget>*<clerk,clerkstage,wnext,csb>preview<platform0,deta,ondigitalocean,easypanel,encr,evervault>relay<expo>staging<edgecompute,fireweb,flutterflow,framer,hosted>*<run>*<web,hasura,loginline,messerli,netfy,netlify,ngrok,ngrok-free,developer>*<noop,northflank>*<upsun>*<replit>id<snowflake>*,privatelink>*<<streamlit,storipress,telebit,typedream,vercel,bookonline,wdh>preview<zeabur<live>aem,hlx,ewp>*<<net>adobeaemcloud,adobeio-static,adobeioruntime,akadns,akamai,akamai-staging,akamaiedge,akamaiedge-staging,akamaihd,akamaihd-staging,akamaiorigin,akamaiorigin-staging,akamaized,akamaized-staging,edgekey,edgekey-staging,edgesuite,edgesuite-staging,alwaysdata,myamaze,cloudfront,appudo,atlassian-dev>prod>cdn<<myfritz,onavstack,shopselect,blackbaudcdn,boomla,bplaced,square7,cdn77>r<cdn77-ssl,gb,hu,jp,se,uk,clickrising,dns-cloud,dns-dynamic,cloudaccess,cloudflare>cdn<cloudflareanycast>cdn<cloudflarecn>cdn<cloudflareglobal>cdn<feste-ip,knx-server,static-access,cryptonomic>*<dattolocal,mydatto,debian,definima,at-band-camp,blogdns,broke-it,buyshouses,dnsalias,dnsdojo,does-it,dontexist,dynalias,dynathome,endofinternet,from-az,from-co,from-la,from-ny,gets-it,ham-radio-op,homeftp,homeip,homelinux,homeunix,in-the-band,is-a-chef,is-a-geek,isa-geek,kicks-ass,office-on-the,podzone,scrapper-site,selfip,sells-it,servebbs,serveftp,thruhere,webhop,casacam,dynu,dynv6,twmail,ru,channelsdvr>u<fastly>freetls,map,prod>a,global<ssl>a,b,global<<fastlylb>map<edgeapp,keyword-on,live-on,server-on,cdn-edges,localcert,localhostcert,heteml,cloudfunctions,iobb,moonscale,in-dsl,in-vpn,apps-1and1,ipifony,cloudjiffy>fra1-de,west1-us<elastx>jls-sto1,jls-sto2,jls-sto3<faststacks,massivegrid>paas>fr-1,lon-1,lon-2,ny-1,ny-2,sg-1<<saveincloud>jelastic,nordeste-idc<scaleforce>j<tsukaeru>jelastic<kinghost,uni5,krellian,ggff,barsy,memset,azure-api,azure-mobile,azureedge,azurefd,azurestaticapps>1,2,3,4,5,6,7,centralus,eastasia,eastus2,westeurope,westus2<azurewebsites,cloudapp,trafficmanager,windows>core>blob<servicebus<mynetname>sn<bounceme,ddns,eating-organic,mydissent,myeffect,mymediapc,mypsx,mysecuritycamera,nhlfan,no-ip,pgafan,privatizehealthinsurance,redirectme,serveblog,serveminecraft,sytes,dnsup,hicam,now-dns,ownip,vpndns,cloudycluster,ovh>hosting>*<webpaas>*<<rackmaze,myradweb,in,squares,schokokeks,firewall-gateway,seidat,senseering,siteleaf,mafelo,myspreadshop,vps-host>jelastic>atl,njs,ric<<srcf>soc,user<supabase,dsmynas,familyds,tailscale>beta<ts>c>*<<torproject>pages<reserve-online,community-pro,meinforum,yandexcloud>storage,website<za<page>aem,hlx,hlx3,translated,codeberg,prvcy,rocky,magnet,pdns,plesk<eu>airkitapps,mycd,cloudns,dogado>jelastic<barsy,wellbeingzone,spdns,transurl>*<diskstation<ca>barsy,awdev>*<co,blogspot,no-ip,myspreadshop,box<estate>compute>*<<network>alces>*<co,arvo,azimuth,tlon<org>altervista,pimienta,poivron,potager,sweetpepper,cdn77>c,rsc<cdn77-secure>origin>ssl<<ae,certmgr,cloudns,ddnss,duckdns,tunk,blogdns,blogsite,boldlygoingnowhere,dnsalias,dnsdojo,doesntexist,dontexist,doomdns,dvrdns,dynalias,dyndns>go,home<endofinternet,endoftheinternet,from-me,game-host,gotdns,hobby-site,homedns,homeftp,homelinux,homeunix,is-a-bruinsfan,is-a-candidate,is-a-celticsfan,is-a-chef,is-a-geek,is-a-knight,is-a-linux-user,is-a-patsfan,is-a-soxfan,is-found,is-lost,is-saved,is-very-bad,is-very-evil,is-very-good,is-very-nice,is-very-sweet,isa-geek,kicks-ass,misconfused,podzone,readmyblog,selfip,sellsyourhome,servebbs,serveftp,servegame,stuff-4-sale,webhop,accesscam,camdvr,freeddns,mywire,webredirect,twmail,eu>al,asso,at,au,be,bg,ca,cd,ch,cn,cy,cz,de,dk,edu,ee,es,fi,fr,gr,hr,hu,ie,il,in,int,is,it,jp,kr,lt,lu,lv,mc,me,mk,mt,my,net,ng,nl,no,nz,paris,pl,pt,q-a,ro,ru,se,si,sk,tr,uk,us<fedorainfracloud,fedorapeople,fedoraproject>cloud,os>app<stg>os>app<<<freedesktop,hatenadiary,hepforge,in-dsl,in-vpn,js,barsy,mayfirst,bmoattachments,cable-modem,collegefan,couchpotatofries,hopto,mlbfan,myftp,mysecuritycamera,nflfan,no-ip,read-books,ufcfan,zapto,dynserv,now-dns,is-local,httpbin,pubtls,jpn,my-firewall,myfirewall,spdns,small-web,dsmynas,familyds,teckids>s3<tuxfamily,diskstation,hk,us,toolforge,wmcloud,wmflabs,za<cn>com>amazonaws>cn-north-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-deprecated,s3-object-lambda,s3-website<cn-northwest-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<compute>*<airflow>cn-north-1>*<cn-northwest-1>*<<eb>cn-north-1,cn-northwest-1<elb>*<<sagemaker>cn-north-1>notebook,studio<cn-northwest-1>notebook,studio<<<canva-apps,canvasite>my>*<<myqnapcloud,sh>as<quickconnect>direct<<aws>sagemaker>ap-northeast-1>labeling,notebook,studio<ap-northeast-2>labeling,notebook,studio<ap-south-1>labeling,notebook,studio<ap-southeast-1>labeling,notebook,studio<ap-southeast-2>labeling,notebook,studio<ca-central-1>labeling,notebook,notebook-fips,studio<eu-central-1>labeling,notebook,studio<eu-west-1>labeling,notebook,studio<eu-west-2>labeling,notebook,studio<us-east-1>labeling,notebook,notebook-fips,studio<us-east-2>labeling,notebook,notebook-fips,studio<us-west-2>labeling,notebook,notebook-fips,studio<af-south-1>notebook,studio<ap-east-1>notebook,studio<ap-northeast-3>notebook,studio<ap-south-2>notebook<ap-southeast-3>notebook,studio<ap-southeast-4>notebook<ca-west-1>notebook,notebook-fips<eu-central-2>notebook<eu-north-1>notebook,studio<eu-south-1>notebook,studio<eu-south-2>notebook,studio<eu-west-3>notebook,studio<il-central-1>notebook,studio<me-central-1>notebook,studio<me-south-1>notebook,studio<sa-east-1>notebook,studio<us-gov-east-1>notebook,notebook-fips,studio,studio-fips<us-gov-west-1>notebook,notebook-fips,studio,studio-fips<us-west-1>notebook,notebook-fips,studio<experiments>*<<repost>private>*<<<online>eero,eero-stage,websitebuilder,barsy<si>f5,gitapp,gitpage,blogspot<jp>ne>aseinet>user<gehirn,ivory,mail-box,mints,mokuren,opal,sakura,sumomo,topaz<buyshop,fashionstore,handcrafted,kawaiishop,supersale,theshop,0am,0g0,0j0,0t0,mydns,pgw,wjg,usercontent,angry,babyblue,babymilk,backdrop,bambina,bitter,blush,boo,boy,boyfriend,but,candypop,capoo,catfood,cheap,chicappa,chillout,chips,chowder,chu,ciao,cocotte,coolblog,cranky,cutegirl,daa,deca,deci,digick,egoism,fakefur,fem,flier,floppy,fool,frenchkiss,girlfriend,girly,gloomy,gonna,greater,hacca,heavy,her,hiho,hippy,holy,hungry,icurus,itigo,jellybean,kikirara,kill,kilo,kuron,littlestar,lolipopmc,lolitapunk,lomo,lovepop,lovesick,main,mods,mond,mongolian,moo,namaste,nikita,nobushi,noor,oops,parallel,parasite,pecori,peewee,penne,pepper,perma,pigboat,pinoko,punyu,pupu,pussycat,pya,raindrop,readymade,sadist,schoolbus,secret,staba,stripper,sub,sunnyday,thick,tonkotsu,under,upper,velvet,verse,versus,vivian,watson,weblike,whitesnow,zombie,blogspot,hateblo,hatenablog,hatenadiary,2-d,bona,crap,daynight,eek,flop,halfmoon,jeez,matrix,mimoza,netgamers,nyanta,o0o0,rdy,rgr,rulez,sakurastorage>isk01>s3<isk02>s3<<saloon,sblo,skr,tank,uh-oh,undo,webaccel>rs,user<websozai,xii<vc>gv>d<0e,mydns<eus>party>user<<link>myfritz,cyon,nftstorage>ipfs<mypep,dweb>*<<ws>advisor>*<cloud66,dyndns,mypets<cloud>banzai>*<elementor,encoway>eu<statics>*<ravendb,axarnet>es-1<diadem,jelastic>vip<jele,jenv-aruba>aruba>eur>it1<<it1<keliweb>cs<oxa>tn,uk<primetel>uk<reclaim>ca,uk,us<trendhosting>ch,de<jotelulu,kuleuven,linkyard,magentosite>*<observablehq,perspecta,vapor,on-rancher>*<scw>baremetal>fr-par-1,fr-par-2,nl-ams-1<fr-par>cockpit,fnc>functions<k8s>nodes<s3,s3-website,whm<instances>priv,pub<k8s,nl-ams>cockpit,k8s>nodes<s3,s3-website,whm<pl-waw>cockpit,k8s>nodes<s3,s3-website<scalebook,smartlabeling<servebolt,onstackit>runs<sensiosite>*<trafficplex,unison-services,urown,voorloper,zap<ec>base,official<shop>base,hoplix,barsy,barsyonline<gay>pages<la>bnr<sh>bip,hashbang,platform>ent,eu,us<now<je>of<ch>square7,cloudns,cloudscale>cust,lpg>objects<rma>objects<<blogspot,flow>ae>alp1<appengine<linkyard-cloud,gotdns,dnsking,123website,myspreadshop,firenet>*,svc>*<<12hp,2ix,4lima,lima-city<de>bplaced,square7,com,cosidns>dyn<dnsupdater,dynamisches-dns,internet-dns,l-o-g-i-n,ddnss>dyn,dyndns<dyn-ip24,dyndns1,home-webserver>dyn<myhome-server,dnshome,fuettertdasnetz,isteingeek,istmein,lebtimnetz,leitungsen,traeumtgerade,frusky>*<goip,blogspot,xn--gnstigbestellen-zvb,xn--gnstigliefern-wob,hs-heilbronn>it>pages<<dyn-berlin,in-berlin,in-brb,in-butter,in-dsl,in-vpn,iservschule,mein-iserv,schulplattform,schulserver,test-iserv,keymachine,git-repos,lcube-server,svn-repos,barsy,123webseite,logoip,firewall-gateway,my-gateway,my-router,spdns,speedpartner>customer<myspreadshop,taifun-dns,12hp,2ix,4lima,lima-city,dd-dns,dray-dns,draydns,dyn-vpn,dynvpn,mein-vigor,my-vigor,my-wan,syno-ds,synology-diskstation,synology-ds,uberspace>*<virtual-user,virtualuser,community-pro,diskussionsbereich<hr>brendly>shop<blogspot,free<rs>brendly>shop<blogspot,ua,barsy,ox<am>radio,blogspot<fm>radio,user>*<<uk>co>bytemark>dh,vm<blogspot,layershift>j<barsy,barsyonline,retrosnub>cust<nh-serv,no-ip,wellbeingzone,adimo,myspreadshop<gov>api,campaign,service<conn,copro,hosp,independent-commission,independent-inquest,independent-inquiry,independent-panel,independent-review,public-inquiry,royal-commission,pymnt,org>glug,lug,lugs,affinitylottery,raffleentry,weeklylottery<barsy,nimsite<site>canva>my>*<<cloudera>*<convex,cyon,fnwk,folionetwork,fastvps,jele,jouwweb,lelux,loginline,barsy,notion,omniwe,opensocial,madethis,platformsh>*<tst>*<byen,srht,novecore,wpsquared<ac>drr,feedback,forms<ai>uwu,framer<co>carrd,crd,otap>*<com>blogspot<leadpages,lpages,mypi,n4t,xmit>*<firewalledreplit>id<repl>id<supabase<mp>ju<cz>contentproxy9>rsc<realm,e4,blogspot,co,metacentrum>cloud>*<custom<muni>cloud>flt,usr<<<bz>za,mydns,gsj<se>com,blogspot,conf,iopsys,123minsida,itcouldbewor,myspreadshop<group>discourse<team>discourse,jelastic<cc>cleverapps,cloudns,ftpaccess,game-server,myphotos,scrapping,twmail,csx,fantasyleague,spawn>instances<<tech>cleverapps<asia>cloudns,daemon,dix<be>cloudns,webhosting,blogspot,interhostsolutions>cloud<kuleuven>ezproxy<123website,myspreadshop,transurl>*<<cl>cloudns,blogspot<club>cloudns,jele,barsy<cx>cloudns,ath,info,assessments,calculators,funnels,paynow,quizzes,researched,tests<in>cloudns,blogspot,barsy,web,supabase<info>cloudns,dynamic-dns,barrel-of-knowledge,barrell-of-knowledge,dyndns,for-our,groks-the,groks-this,here-for-more,knowsitall,selfip,webhop,barsy,mayfirst,dvrcam,ilovecollege,no-ip,forumz,nsupdate,dnsupdate,v-info<nz>cloudns,co>blogspot<<ph>cloudns<pw>cloudns,x443<me>c66,craft,daplie>localhost<edgestack,filegear,glitch,filegear-sg,lohmus,barsy,mcdir,mcpe,brasilia,ddns,dnsfor,hopto,loginto,noip,webhop,soundcast,tcp4,vp4,diskstation,dscloud,i234,myds,synology,transip>site<yombo,nohost<zone>cloud66,hs,triton>*<stackit,lima<host>cloudaccess,freesite,easypanel,fastvps,myfast,tempurl,wpmudev,jele,mircloud,wp2,half<gdn>cnpy<nl>co,hosting-cluster,blogspot,gov,khplay,123website,myspreadshop,transurl>*<cistron,demon<no>co,blogspot,123hjemmeside,myspreadshop<ru>ac,edu,gov,int,mil,test,eurodir,adygeya,bashkiria,bir,cbg,com,dagestan,grozny,kalmykia,kustanai,marine,mordovia,msk,mytis,nalchik,nov,pyatigorsk,spb,vladikavkaz,vladimir,blogspot,na4u,mircloud,regruhosting>jelastic<myjino>hosting>*<landing>*<spectrum>*<vps>*<<cldmail>hb<mcdir>vps<mcpre,net,org,pp,lk3,ras<email>crisp>on<tawk>p<tawkto>p<<dk>biz,co,firm,reg,store,blogspot,123hjemmeside,myspreadshop<earth>dapps>*,bzz>*<<<kg>us<id>my>rss>*<<flap,co>blogspot<forte<solutions>diher>*<<th>online,shop<fi>dy,blogspot,xn--hkkinen-5wa,iki,cloudplatform>fi<datacenter>demo,paas<kapsi,123kotisivu,myspreadshop<name>her>forgot<his>forgot<<nu>merseine,mine,shacknet,enterprisecloud<tv>better-than,dyndns,on-the-web,worse-than,from,sakura<rocks>myddns,stackit,lima-city,webspace<xyz>blogsite,localzone,crafting,zapto,telebit>*<<one>onred>staging<kin>*<service,homelink<tw>com>mymailer<url,mydns,blogspot<camp>emf>at<<ht>rt<cool>elementor,de<fr>en-root,fbx-os,fbxos,freebox-os,freeboxos,blogspot,goupile,123siteweb,on-web,chirurgiens-dentistes-en-france,dedibox,aeroport,avocat,chambagri,chirurgiens-dentistes,experts-comptables,medecin,notaires,pharmacien,port,veterinaire,myspreadshop,ynh<su>abkhazia,adygeya,aktyubinsk,arkhangelsk,armenia,ashgabad,azerbaijan,balashov,bashkiria,bryansk,bukhara,chimkent,dagestan,east-kazakhstan,exnet,georgia,grozny,ivanovo,jambyl,kalmykia,kaluga,karacol,karaganda,karelia,khakassia,krasnodar,kurgan,kustanai,lenug,mangyshlak,mordovia,msk,murmansk,nalchik,navoi,north-kazakhstan,nov,obninsk,penza,pokrovsk,sochi,spb,tashkent,termez,togliatti,troitsk,tselinograd,tula,tuva,vladikavkaz,vladimir,vologda<space>myfast,heiyu,app-ionos,uber,xs4all<media>framer<photos>framer<website>framer<wiki>framer<at>funkfeuer>wien<futurecms>*,ex>*<in>*<<futurehosting,futuremailing,ortsinfo>ex>*<kunden>*<<co>blogspot<biz,info,123webseite,priv,myspreadshop,12hp,2ix,4lima,lima-city<ms>lab,minisite<work>corpnet<community>nog,ravendb,myforum<ro>co,shop,blogspot,barsy<design>graphic,bss<ae>blogspot<al>blogspot<ar>com>blogspot<<au>com>blogspot,cloudlets>mel<myspreadshop<<ba>blogspot,rs<bg>blogspot,barsy<bj>blogspot<br>com>blogspot,simplesite<leg>ac,al,am,ap,ba,ce,df,es,go,ma,mg,ms,mt,pa,pb,pe,pi,pr,rj,rn,ro,rr,rs,sc,se,sp,to<<by>com>blogspot<mycloud,mediatech<cf>blogspot<cv>blogspot<cy>com>blogspot,scaleforce>j<<<ee>com>blogspot<<eg>com>blogspot<<es>com>blogspot<123miweb,myspreadshop<goog>cloud,translate,usercontent>*<<gr>blogspot,barsy,simplesite<hk>blogspot,secaas,inc,ltd<hu>blogspot<ie>blogspot,myspreadshop<il>co>blogspot,ravpage,mytabit,tabitorder<<is>blogspot<ke>co>blogspot<<kr>blogspot<li>blogspot,caa<lt>blogspot<lu>blogspot,123website<md>blogspot,ir<mk>blogspot<mr>blogspot<mt>com>blogspot<<mx>blogspot<my>blogspot<ng>com>blogspot<col,firm,gen,ltd,ngo<pe>blogspot<pt>blogspot,123paginaweb<qa>blogspot<re>blogspot,can<sg>blogspot,enscaled<sk>blogspot<sn>blogspot<td>blogspot<tr>com>blogspot<<ug>blogspot<uy>com>blogspot<<vn>blogspot<za>co>blogspot<<digital>cloudapps>london<<ci>fin<run>hs,development,ravendb,servers,build>*<code>*<database>*<migration>*<onporter,repl,stackit,val>express,web<wix<st>helioho,kirara,noho<pub>id>*<kin>*<barsy<gl>biz<scot>edu,gov>service<<so>sch,surveys<kz>jcloud,kazteleport>upaas<<tn>orangecloud<gg>kaas,stackit,panel>daemon<<systems>knightpoint<events>koobin,co<direct>libp2p<business>co<education>co<financial>co<place>co<technology>co<bs>we<services>loginline<menu>barsy,barsyonline<mobi>barsy,dscloud<store>barsy,sellfy,shopware,storebase<support>barsy<health>hra<casa>nabu>ui<<pizza>ngrok<news>noticeable<top>now-dns,ntdll,wadl>*<<ovh>nerdpol<mn>nyc<ong>obl<lol>omg<hosting>opencraft<orange>tech<pm>own,name<codes>owo>*<<lc>oy<games>pley,sheezy<bn>co<today>prequalifyme<builders>cloudsite<basketball>aus,nz<edu>rit>git-pages<<xn--p1acf>xn--90amc,xn--j1aef,xn--j1ael8b,xn--h1ahn,xn--j1adp,xn--c1avg,xn--80aaa0cvac,xn--h1aliz,xn--90a1af,xn--41a<mom>ind<farm>storj<pictures>1337<rip>clan<tf>sch<wf>biz,sch<yt>org<management>router<academy>official<faith>ybo<party>ybo<review>ybo<science>ybo<trade>ybo";
-
-// node_modules/parse-domain/build/trie/characters.js
-var UP = "<";
-var SAME = ",";
-var DOWN = ">";
-var RESET = "|";
-var WILDCARD = "*";
-var EXCEPTION = "!";
-
-// node_modules/parse-domain/build/trie/look-up.js
-var lookUpTldsInTrie = (labels, trie) => {
-  const labelsToCheck = labels.slice();
-  const tlds = [];
-  let node = trie;
-  while (labelsToCheck.length !== 0) {
-    const label = labelsToCheck.pop();
-    const labelLowerCase = label.toLowerCase();
-    if (node.children.has(WILDCARD)) {
-      if (node.children.has(EXCEPTION + labelLowerCase)) {
-        break;
-      }
-      node = node.children.get(WILDCARD);
-    } else {
-      if (node.children.has(labelLowerCase) === false) {
-        break;
-      }
-      node = node.children.get(labelLowerCase);
-    }
-    tlds.unshift(label);
-  }
-  return tlds;
 };
 
 // node_modules/ip-regex/index.js
@@ -32986,8 +33832,8 @@ function functionTimeout(function_, { timeout } = {}) {
   });
   return wrappedFunction;
 }
-function isTimeoutError(error49) {
-  return error49?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT";
+function isTimeoutError(error52) {
+  return error52?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT";
 }
 
 // node_modules/is-regexp/index.js
@@ -33019,11 +33865,11 @@ function clonedRegexp(regexp, options2 = {}) {
 function isMatch(regex, string4, { timeout } = {}) {
   try {
     return functionTimeout(() => clonedRegexp(regex).test(string4), { timeout })();
-  } catch (error49) {
-    if (isTimeoutError(error49)) {
+  } catch (error52) {
+    if (isTimeoutError(error52)) {
       return false;
     }
-    throw error49;
+    throw error52;
   }
 }
 
@@ -33054,7 +33900,7 @@ function ipVersion(string4) {
   }
 }
 
-// node_modules/parse-domain/build/sanitize.js
+// node_modules/parse-domain/dist/sanitize.js
 var LABEL_SEPARATOR = ".";
 var LABEL_LENGTH_MIN = 1;
 var LABEL_LENGTH_MAX = 63;
@@ -33138,7 +33984,7 @@ var sanitize = (input, options2 = {}) => {
       labels: []
     };
   }
-  const inputTrimmedAsIp = input.replace(/^\[|]$/g, "");
+  const inputTrimmedAsIp = input.replaceAll(/^\[|]$/g, "");
   const ipVersionOfInput = ipVersion(inputTrimmedAsIp);
   if (ipVersionOfInput !== void 0) {
     return {
@@ -33147,7 +33993,7 @@ var sanitize = (input, options2 = {}) => {
       ipVersion: ipVersionOfInput
     };
   }
-  const lastChar = input.charAt(input.length - 1);
+  const lastChar = input[input.length - 1];
   const canonicalInput = lastChar === LABEL_SEPARATOR ? input.slice(0, -1) : input;
   const octets = new TextEncoder().encode(canonicalInput);
   if (octets.length > DOMAIN_LENGTH_MAX) {
@@ -33219,7 +34065,45 @@ var validateLabels = {
   }
 };
 
-// node_modules/parse-domain/build/trie/nodes.js
+// node_modules/parse-domain/serialized-tries/icann.js
+var icann_default = "ac>com,edu,gov,mil,net,org<ad,ae>ac,co,gov,mil,net,org,sch<aero>airline,airport,accident-investigation,accident-prevention,aerobatic,aeroclub,aerodrome,agents,air-surveillance,air-traffic-control,aircraft,airtraffic,ambulance,association,author,ballooning,broker,caa,cargo,catering,certification,championship,charter,civilaviation,club,conference,consultant,consulting,control,council,crew,design,dgca,educator,emergency,engine,engineer,entertainment,equipment,exchange,express,federation,flight,freight,fuel,gliding,government,groundhandling,group,hanggliding,homebuilt,insurance,journal,journalist,leasing,logistics,magazine,maintenance,marketplace,media,microlight,modelling,navigation,parachuting,paragliding,passenger-association,pilot,press,production,recreation,repbody,res,research,rotorcraft,safety,scientist,services,show,skydiving,software,student,taxi,trader,trading,trainer,union,workinggroup,works<af>com,edu,gov,net,org<ag>co,com,net,nom,org<ai>com,net,off,org<al>com,edu,gov,mil,net,org<am>co,com,commune,net,org<ao>co,ed,edu,gov,gv,it,og,org,pb<aq,ar>bet,com,coop,edu,gob,gov,int,mil,musica,mutual,net,org,seg,senasa,tur<arpa>e164,home,in-addr,ip6,iris,uri,urn<as>gov<asia,at>ac>sth<co,gv,or<au>asn,com,edu>act,catholic,nsw,nt,qld,sa,tas,vic,wa<gov>qld,sa,tas,vic,wa<id,net,org,conf,oz,act,nsw,nt,qld,sa,tas,vic,wa<aw>com<ax,az>biz,co,com,edu,gov,info,int,mil,name,net,org,pp,pro<ba>com,edu,gov,mil,net,org<bb>biz,co,com,edu,gov,info,net,org,store,tv<bd>ac,ai,co,com,edu,gov,id,info,it,mil,net,org,sch,tv<be>ac<bf>gov<bg>0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z<bh>com,edu,gov,net,org<bi>co,com,edu,or,org<biz,bj>africa,agro,architectes,assur,avocats,co,com,eco,econo,edu,info,loisirs,money,net,org,ote,restaurant,resto,tourism,univ<bm>com,edu,gov,net,org<bn>com,edu,gov,net,org<bo>com,edu,gob,int,mil,net,org,tv,web,academia,agro,arte,blog,bolivia,ciencia,cooperativa,democracia,deporte,ecologia,economia,empresa,indigena,industria,info,medicina,movimiento,musica,natural,nombre,noticias,patria,plurinacional,politica,profesional,pueblo,revista,salud,tecnologia,tksat,transporte,wiki<br>9guacu,abc,adm,adv,agr,aju,am,anani,aparecida,api,app,arq,art,ato,b,barueri,belem,bet,bhz,bib,bio,blog,bmd,boavista,bsb,campinagrande,campinas,caxias,cim,cng,cnt,com,contagem,coop,coz,cri,cuiaba,curitiba,def,des,det,dev,ecn,eco,edu,emp,enf,eng,esp,etc,eti,far,feira,flog,floripa,fm,fnd,fortal,fot,foz,fst,g12,geo,ggf,goiania,gov>ac,al,am,ap,ba,ce,df,es,go,ma,mg,ms,mt,pa,pb,pe,pi,pr,rj,rn,ro,rr,rs,sc,se,sp,to<gru,ia,imb,ind,inf,jab,jampa,jdf,joinville,jor,jus,leg,leilao,lel,log,londrina,macapa,maceio,manaus,maringa,mat,med,mil,morena,mp,mus,natal,net,niteroi,nom>*<not,ntr,odo,ong,org,osasco,palmas,poa,ppg,pro,psc,psi,pvh,qsl,radio,rec,recife,rep,ribeirao,rio,riobranco,riopreto,salvador,sampa,santamaria,santoandre,saobernardo,saogonca,seg,sjc,slg,slz,social,sorocaba,srv,taxi,tc,tec,teo,the,tmp,trd,tur,tv,udi,vet,vix,vlog,wiki,xyz,zlg<bs>com,edu,gov,net,org<bt>com,edu,gov,net,org<bv,bw>ac,co,gov,net,org<by>gov,mil,com,of<bz>co,com,edu,gov,net,org<ca>ab,bc,mb,nb,nf,nl,ns,nt,nu,on,pe,qc,sk,yk,gc<cat,cc,cd>gov<cf,cg,ch,ci>ac,xn--aroport-bya,asso,co,com,ed,edu,go,gouv,int,net,or,org<ck>*,!www<cl>co,gob,gov,mil<cm>co,com,gov,net<cn>ac,com,edu,gov,mil,net,org,xn--55qx5d,xn--od0alg,xn--io0a7i,ah,bj,cq,fj,gd,gs,gx,gz,ha,hb,he,hi,hk,hl,hn,jl,js,jx,ln,mo,nm,nx,qh,sc,sd,sh,sn,sx,tj,tw,xj,xz,yn,zj<co>com,edu,gov,mil,net,nom,org<com,coop,cr>ac,co,ed,fi,go,or,sa<cu>com,edu,gob,inf,nat,net,org<cv>com,edu,id,int,net,nome,org,publ<cw>com,edu,net,org<cx>gov<cy>ac,biz,com,ekloges,gov,ltd,mil,net,org,press,pro,tm<cz>gov<de,dj,dk,dm>co,com,edu,gov,net,org<do>art,com,edu,gob,gov,mil,net,org,sld,web<dz>art,asso,com,edu,gov,net,org,pol,soc,tm<ec>abg,adm,agron,arqt,art,bar,chef,com,cont,cpa,cue,dent,dgn,disco,doc,edu,eng,esm,fin,fot,gal,gob,gov,gye,ibr,info,k12,lat,loj,med,mil,mktg,mon,net,ntr,odont,org,pro,prof,psic,psiq,pub,rio,rrpp,sal,tech,tul,tur,uio,vet,xxx<edu,ee>aip,com,edu,fie,gov,lib,med,org,pri,riik<eg>ac,com,edu,eun,gov,info,me,mil,name,net,org,sci,sport,tv<er>*<es>com,edu,gob,nom,org<et>biz,com,edu,gov,info,name,net,org<eu,fi>aland<fj>ac,biz,com,edu,gov,id,info,mil,name,net,org,pro<fk>*<fm>com,edu,net,org<fo,fr>asso,com,gouv,nom,prd,tm,avoues,cci,greta,huissier-justice<ga,gb,gd>edu,gov<ge>com,edu,gov,net,org,pvt,school<gf,gg>co,net,org<gh>biz,com,edu,gov,mil,net,org<gi>com,edu,gov,ltd,mod,org<gl>co,com,edu,net,org<gm,gn>ac,com,edu,gov,net,org<gov,gp>asso,com,edu,mobi,net,org<gq,gr>com,edu,gov,net,org<gs,gt>com,edu,gob,ind,mil,net,org<gu>com,edu,gov,guam,info,net,org,web<gw,gy>co,com,edu,gov,net,org<hk>com,edu,gov,idv,net,org,xn--ciqpn,xn--gmqw5a,xn--55qx5d,xn--mxtq1m,xn--lcvr32d,xn--wcvs22d,xn--gmq050i,xn--uc0atv,xn--uc0ay4a,xn--od0alg,xn--zf0avx,xn--mk0axi,xn--tn0ag,xn--od0aq3b,xn--io0a7i<hm,hn>com,edu,gob,mil,net,org<hr>com,from,iz,name<ht>adult,art,asso,com,coop,edu,firm,gouv,info,med,net,org,perso,pol,pro,rel,shop<hu>2000,agrar,bolt,casino,city,co,erotica,erotika,film,forum,games,hotel,info,ingatlan,jogasz,konyvelo,lakas,media,news,org,priv,reklam,sex,shop,sport,suli,szex,tm,tozsde,utazas,video<id>ac,biz,co,desa,go,kop,mil,my,net,or,ponpes,sch,web,xn--9tfky<ie>gov<il>ac,co,gov,idf,k12,muni,net,org<xn--4dbrk0ce>xn--4dbgdty6c,xn--5dbhl8d,xn--8dbq2a,xn--hebda8b<im>ac,co>ltd,plc<com,net,org,tt,tv<in>5g,6g,ac,ai,am,bank,bihar,biz,business,ca,cn,co,com,coop,cs,delhi,dr,edu,er,fin,firm,gen,gov,gujarat,ind,info,int,internet,io,me,mil,net,nic,org,pg,post,pro,res,travel,tv,uk,up,us<info,int>eu<io>co,com,edu,gov,mil,net,nom,org<iq>com,edu,gov,mil,net,org<ir>ac,co,gov,id,net,org,sch,xn--mgba3a4f16a,xn--mgba3a4fra<is,it>edu,gov,abr,abruzzo,aosta-valley,aostavalley,bas,basilicata,cal,calabria,cam,campania,emilia-romagna,emiliaromagna,emr,friuli-v-giulia,friuli-ve-giulia,friuli-vegiulia,friuli-venezia-giulia,friuli-veneziagiulia,friuli-vgiulia,friuliv-giulia,friulive-giulia,friulivegiulia,friulivenezia-giulia,friuliveneziagiulia,friulivgiulia,fvg,laz,lazio,lig,liguria,lom,lombardia,lombardy,lucania,mar,marche,mol,molise,piedmont,piemonte,pmn,pug,puglia,sar,sardegna,sardinia,sic,sicilia,sicily,taa,tos,toscana,trentin-sud-tirol,xn--trentin-sd-tirol-rzb,trentin-sudtirol,xn--trentin-sdtirol-7vb,trentin-sued-tirol,trentin-suedtirol,trentino,trentino-a-adige,trentino-aadige,trentino-alto-adige,trentino-altoadige,trentino-s-tirol,trentino-stirol,trentino-sud-tirol,xn--trentino-sd-tirol-c3b,trentino-sudtirol,xn--trentino-sdtirol-szb,trentino-sued-tirol,trentino-suedtirol,trentinoa-adige,trentinoaadige,trentinoalto-adige,trentinoaltoadige,trentinos-tirol,trentinostirol,trentinosud-tirol,xn--trentinosd-tirol-rzb,trentinosudtirol,xn--trentinosdtirol-7vb,trentinosued-tirol,trentinosuedtirol,trentinsud-tirol,xn--trentinsd-tirol-6vb,trentinsudtirol,xn--trentinsdtirol-nsb,trentinsued-tirol,trentinsuedtirol,tuscany,umb,umbria,val-d-aosta,val-daosta,vald-aosta,valdaosta,valle-aosta,valle-d-aosta,valle-daosta,valleaosta,valled-aosta,valledaosta,vallee-aoste,xn--valle-aoste-ebb,vallee-d-aoste,xn--valle-d-aoste-ehb,valleeaoste,xn--valleaoste-e7a,valleedaoste,xn--valledaoste-ebb,vao,vda,ven,veneto,ag,agrigento,al,alessandria,alto-adige,altoadige,an,ancona,andria-barletta-trani,andria-trani-barletta,andriabarlettatrani,andriatranibarletta,ao,aosta,aoste,ap,aq,aquila,ar,arezzo,ascoli-piceno,ascolipiceno,asti,at,av,avellino,ba,balsan,balsan-sudtirol,xn--balsan-sdtirol-nsb,balsan-suedtirol,bari,barletta-trani-andria,barlettatraniandria,belluno,benevento,bergamo,bg,bi,biella,bl,bn,bo,bologna,bolzano,bolzano-altoadige,bozen,bozen-sudtirol,xn--bozen-sdtirol-2ob,bozen-suedtirol,br,brescia,brindisi,bs,bt,bulsan,bulsan-sudtirol,xn--bulsan-sdtirol-nsb,bulsan-suedtirol,bz,ca,cagliari,caltanissetta,campidano-medio,campidanomedio,campobasso,carbonia-iglesias,carboniaiglesias,carrara-massa,carraramassa,caserta,catania,catanzaro,cb,ce,cesena-forli,xn--cesena-forl-mcb,cesenaforli,xn--cesenaforl-i8a,ch,chieti,ci,cl,cn,co,como,cosenza,cr,cremona,crotone,cs,ct,cuneo,cz,dell-ogliastra,dellogliastra,en,enna,fc,fe,fermo,ferrara,fg,fi,firenze,florence,fm,foggia,forli-cesena,xn--forl-cesena-fcb,forlicesena,xn--forlcesena-c8a,fr,frosinone,ge,genoa,genova,go,gorizia,gr,grosseto,iglesias-carbonia,iglesiascarbonia,im,imperia,is,isernia,kr,la-spezia,laquila,laspezia,latina,lc,le,lecce,lecco,li,livorno,lo,lodi,lt,lu,lucca,macerata,mantova,massa-carrara,massacarrara,matera,mb,mc,me,medio-campidano,mediocampidano,messina,mi,milan,milano,mn,mo,modena,monza,monza-brianza,monza-e-della-brianza,monzabrianza,monzaebrianza,monzaedellabrianza,ms,mt,na,naples,napoli,no,novara,nu,nuoro,og,ogliastra,olbia-tempio,olbiatempio,or,oristano,ot,pa,padova,padua,palermo,parma,pavia,pc,pd,pe,perugia,pesaro-urbino,pesarourbino,pescara,pg,pi,piacenza,pisa,pistoia,pn,po,pordenone,potenza,pr,prato,pt,pu,pv,pz,ra,ragusa,ravenna,rc,re,reggio-calabria,reggio-emilia,reggiocalabria,reggioemilia,rg,ri,rieti,rimini,rm,rn,ro,roma,rome,rovigo,sa,salerno,sassari,savona,si,siena,siracusa,so,sondrio,sp,sr,ss,xn--sdtirol-n2a,suedtirol,sv,ta,taranto,te,tempio-olbia,tempioolbia,teramo,terni,tn,to,torino,tp,tr,trani-andria-barletta,trani-barletta-andria,traniandriabarletta,tranibarlettaandria,trapani,trento,treviso,trieste,ts,turin,tv,ud,udine,urbino-pesaro,urbinopesaro,va,varese,vb,vc,ve,venezia,venice,verbania,vercelli,verona,vi,vibo-valentia,vibovalentia,vicenza,viterbo,vr,vs,vt,vv<je>co,net,org<jm>*<jo>agri,ai,com,edu,eng,fm,gov,mil,net,org,per,phd,sch,tv<jobs,jp>ac,ad,co,ed,go,gr,lg,ne,or,aichi>aisai,ama,anjo,asuke,chiryu,chita,fuso,gamagori,handa,hazu,hekinan,higashiura,ichinomiya,inazawa,inuyama,isshiki,iwakura,kanie,kariya,kasugai,kira,kiyosu,komaki,konan,kota,mihama,miyoshi,nishio,nisshin,obu,oguchi,oharu,okazaki,owariasahi,seto,shikatsu,shinshiro,shitara,tahara,takahama,tobishima,toei,togo,tokai,tokoname,toyoake,toyohashi,toyokawa,toyone,toyota,tsushima,yatomi<akita>akita,daisen,fujisato,gojome,hachirogata,happou,higashinaruse,honjo,honjyo,ikawa,kamikoani,kamioka,katagami,kazuno,kitaakita,kosaka,kyowa,misato,mitane,moriyoshi,nikaho,noshiro,odate,oga,ogata,semboku,yokote,yurihonjo<aomori>aomori,gonohe,hachinohe,hashikami,hiranai,hirosaki,itayanagi,kuroishi,misawa,mutsu,nakadomari,noheji,oirase,owani,rokunohe,sannohe,shichinohe,shingo,takko,towada,tsugaru,tsuruta<chiba>abiko,asahi,chonan,chosei,choshi,chuo,funabashi,futtsu,hanamigawa,ichihara,ichikawa,ichinomiya,inzai,isumi,kamagaya,kamogawa,kashiwa,katori,katsuura,kimitsu,kisarazu,kozaki,kujukuri,kyonan,matsudo,midori,mihama,minamiboso,mobara,mutsuzawa,nagara,nagareyama,narashino,narita,noda,oamishirasato,omigawa,onjuku,otaki,sakae,sakura,shimofusa,shirako,shiroi,shisui,sodegaura,sosa,tako,tateyama,togane,tohnosho,tomisato,urayasu,yachimata,yachiyo,yokaichiba,yokoshibahikari,yotsukaido<ehime>ainan,honai,ikata,imabari,iyo,kamijima,kihoku,kumakogen,masaki,matsuno,matsuyama,namikata,niihama,ozu,saijo,seiyo,shikokuchuo,tobe,toon,uchiko,uwajima,yawatahama<fukui>echizen,eiheiji,fukui,ikeda,katsuyama,mihama,minamiechizen,obama,ohi,ono,sabae,sakai,takahama,tsuruga,wakasa<fukuoka>ashiya,buzen,chikugo,chikuho,chikujo,chikushino,chikuzen,chuo,dazaifu,fukuchi,hakata,higashi,hirokawa,hisayama,iizuka,inatsuki,kaho,kasuga,kasuya,kawara,keisen,koga,kurate,kurogi,kurume,minami,miyako,miyama,miyawaka,mizumaki,munakata,nakagawa,nakama,nishi,nogata,ogori,okagaki,okawa,oki,omuta,onga,onojo,oto,saigawa,sasaguri,shingu,shinyoshitomi,shonai,soeda,sue,tachiarai,tagawa,takata,toho,toyotsu,tsuiki,ukiha,umi,usui,yamada,yame,yanagawa,yukuhashi<fukushima>aizubange,aizumisato,aizuwakamatsu,asakawa,bandai,date,fukushima,furudono,futaba,hanawa,higashi,hirata,hirono,iitate,inawashiro,ishikawa,iwaki,izumizaki,kagamiishi,kaneyama,kawamata,kitakata,kitashiobara,koori,koriyama,kunimi,miharu,mishima,namie,nango,nishiaizu,nishigo,okuma,omotego,ono,otama,samegawa,shimogo,shirakawa,showa,soma,sukagawa,taishin,tamakawa,tanagura,tenei,yabuki,yamato,yamatsuri,yanaizu,yugawa<gifu>anpachi,ena,gifu,ginan,godo,gujo,hashima,hichiso,hida,higashishirakawa,ibigawa,ikeda,kakamigahara,kani,kasahara,kasamatsu,kawaue,kitagata,mino,minokamo,mitake,mizunami,motosu,nakatsugawa,ogaki,sakahogi,seki,sekigahara,shirakawa,tajimi,takayama,tarui,toki,tomika,wanouchi,yamagata,yaotsu,yoro<gunma>annaka,chiyoda,fujioka,higashiagatsuma,isesaki,itakura,kanna,kanra,katashina,kawaba,kiryu,kusatsu,maebashi,meiwa,midori,minakami,naganohara,nakanojo,nanmoku,numata,oizumi,ora,ota,shibukawa,shimonita,shinto,showa,takasaki,takayama,tamamura,tatebayashi,tomioka,tsukiyono,tsumagoi,ueno,yoshioka<hiroshima>asaminami,daiwa,etajima,fuchu,fukuyama,hatsukaichi,higashihiroshima,hongo,jinsekikogen,kaita,kui,kumano,kure,mihara,miyoshi,naka,onomichi,osakikamijima,otake,saka,sera,seranishi,shinichi,shobara,takehara<hokkaido>abashiri,abira,aibetsu,akabira,akkeshi,asahikawa,ashibetsu,ashoro,assabu,atsuma,bibai,biei,bifuka,bihoro,biratori,chippubetsu,chitose,date,ebetsu,embetsu,eniwa,erimo,esan,esashi,fukagawa,fukushima,furano,furubira,haboro,hakodate,hamatonbetsu,hidaka,higashikagura,higashikawa,hiroo,hokuryu,hokuto,honbetsu,horokanai,horonobe,ikeda,imakane,ishikari,iwamizawa,iwanai,kamifurano,kamikawa,kamishihoro,kamisunagawa,kamoenai,kayabe,kembuchi,kikonai,kimobetsu,kitahiroshima,kitami,kiyosato,koshimizu,kunneppu,kuriyama,kuromatsunai,kushiro,kutchan,kyowa,mashike,matsumae,mikasa,minamifurano,mombetsu,moseushi,mukawa,muroran,naie,nakagawa,nakasatsunai,nakatombetsu,nanae,nanporo,nayoro,nemuro,niikappu,niki,nishiokoppe,noboribetsu,numata,obihiro,obira,oketo,okoppe,otaru,otobe,otofuke,otoineppu,oumu,ozora,pippu,rankoshi,rebun,rikubetsu,rishiri,rishirifuji,saroma,sarufutsu,shakotan,shari,shibecha,shibetsu,shikabe,shikaoi,shimamaki,shimizu,shimokawa,shinshinotsu,shintoku,shiranuka,shiraoi,shiriuchi,sobetsu,sunagawa,taiki,takasu,takikawa,takinoue,teshikaga,tobetsu,tohma,tomakomai,tomari,toya,toyako,toyotomi,toyoura,tsubetsu,tsukigata,urakawa,urausu,uryu,utashinai,wakkanai,wassamu,yakumo,yoichi<hyogo>aioi,akashi,ako,amagasaki,aogaki,asago,ashiya,awaji,fukusaki,goshiki,harima,himeji,ichikawa,inagawa,itami,kakogawa,kamigori,kamikawa,kasai,kasuga,kawanishi,miki,minamiawaji,nishinomiya,nishiwaki,ono,sanda,sannan,sasayama,sayo,shingu,shinonsen,shiso,sumoto,taishi,taka,takarazuka,takasago,takino,tamba,tatsuno,toyooka,yabu,yashiro,yoka,yokawa<ibaraki>ami,asahi,bando,chikusei,daigo,fujishiro,hitachi,hitachinaka,hitachiomiya,hitachiota,ibaraki,ina,inashiki,itako,iwama,joso,kamisu,kasama,kashima,kasumigaura,koga,miho,mito,moriya,naka,namegata,oarai,ogawa,omitama,ryugasaki,sakai,sakuragawa,shimodate,shimotsuma,shirosato,sowa,suifu,takahagi,tamatsukuri,tokai,tomobe,tone,toride,tsuchiura,tsukuba,uchihara,ushiku,yachiyo,yamagata,yawara,yuki<ishikawa>anamizu,hakui,hakusan,kaga,kahoku,kanazawa,kawakita,komatsu,nakanoto,nanao,nomi,nonoichi,noto,shika,suzu,tsubata,tsurugi,uchinada,wajima<iwate>fudai,fujisawa,hanamaki,hiraizumi,hirono,ichinohe,ichinoseki,iwaizumi,iwate,joboji,kamaishi,kanegasaki,karumai,kawai,kitakami,kuji,kunohe,kuzumaki,miyako,mizusawa,morioka,ninohe,noda,ofunato,oshu,otsuchi,rikuzentakata,shiwa,shizukuishi,sumita,tanohata,tono,yahaba,yamada<kagawa>ayagawa,higashikagawa,kanonji,kotohira,manno,marugame,mitoyo,naoshima,sanuki,tadotsu,takamatsu,tonosho,uchinomi,utazu,zentsuji<kagoshima>akune,amami,hioki,isa,isen,izumi,kagoshima,kanoya,kawanabe,kinko,kouyama,makurazaki,matsumoto,minamitane,nakatane,nishinoomote,satsumasendai,soo,tarumizu,yusui<kanagawa>aikawa,atsugi,ayase,chigasaki,ebina,fujisawa,hadano,hakone,hiratsuka,isehara,kaisei,kamakura,kiyokawa,matsuda,minamiashigara,miura,nakai,ninomiya,odawara,oi,oiso,sagamihara,samukawa,tsukui,yamakita,yamato,yokosuka,yugawara,zama,zushi<kochi>aki,geisei,hidaka,higashitsuno,ino,kagami,kami,kitagawa,kochi,mihara,motoyama,muroto,nahari,nakamura,nankoku,nishitosa,niyodogawa,ochi,okawa,otoyo,otsuki,sakawa,sukumo,susaki,tosa,tosashimizu,toyo,tsuno,umaji,yasuda,yusuhara<kumamoto>amakusa,arao,aso,choyo,gyokuto,kamiamakusa,kikuchi,kumamoto,mashiki,mifune,minamata,minamioguni,nagasu,nishihara,oguni,ozu,sumoto,takamori,uki,uto,yamaga,yamato,yatsushiro<kyoto>ayabe,fukuchiyama,higashiyama,ide,ine,joyo,kameoka,kamo,kita,kizu,kumiyama,kyotamba,kyotanabe,kyotango,maizuru,minami,minamiyamashiro,miyazu,muko,nagaokakyo,nakagyo,nantan,oyamazaki,sakyo,seika,tanabe,uji,ujitawara,wazuka,yamashina,yawata<mie>asahi,inabe,ise,kameyama,kawagoe,kiho,kisosaki,kiwa,komono,kumano,kuwana,matsusaka,meiwa,mihama,minamiise,misugi,miyama,nabari,shima,suzuka,tado,taiki,taki,tamaki,toba,tsu,udono,ureshino,watarai,yokkaichi<miyagi>furukawa,higashimatsushima,ishinomaki,iwanuma,kakuda,kami,kawasaki,marumori,matsushima,minamisanriku,misato,murata,natori,ogawara,ohira,onagawa,osaki,rifu,semine,shibata,shichikashuku,shikama,shiogama,shiroishi,tagajo,taiwa,tome,tomiya,wakuya,watari,yamamoto,zao<miyazaki>aya,ebino,gokase,hyuga,kadogawa,kawaminami,kijo,kitagawa,kitakata,kitaura,kobayashi,kunitomi,kushima,mimata,miyakonojo,miyazaki,morotsuka,nichinan,nishimera,nobeoka,saito,shiiba,shintomi,takaharu,takanabe,takazaki,tsuno<nagano>achi,agematsu,anan,aoki,asahi,azumino,chikuhoku,chikuma,chino,fujimi,hakuba,hara,hiraya,iida,iijima,iiyama,iizuna,ikeda,ikusaka,ina,karuizawa,kawakami,kiso,kisofukushima,kitaaiki,komagane,komoro,matsukawa,matsumoto,miasa,minamiaiki,minamimaki,minamiminowa,minowa,miyada,miyota,mochizuki,nagano,nagawa,nagiso,nakagawa,nakano,nozawaonsen,obuse,ogawa,okaya,omachi,omi,ookuwa,ooshika,otaki,otari,sakae,sakaki,saku,sakuho,shimosuwa,shinanomachi,shiojiri,suwa,suzaka,takagi,takamori,takayama,tateshina,tatsuno,togakushi,togura,tomi,ueda,wada,yamagata,yamanouchi,yasaka,yasuoka<nagasaki>chijiwa,futsu,goto,hasami,hirado,iki,isahaya,kawatana,kuchinotsu,matsuura,nagasaki,obama,omura,oseto,saikai,sasebo,seihi,shimabara,shinkamigoto,togitsu,tsushima,unzen<nara>ando,gose,heguri,higashiyoshino,ikaruga,ikoma,kamikitayama,kanmaki,kashiba,kashihara,katsuragi,kawai,kawakami,kawanishi,koryo,kurotaki,mitsue,miyake,nara,nosegawa,oji,ouda,oyodo,sakurai,sango,shimoichi,shimokitayama,shinjo,soni,takatori,tawaramoto,tenkawa,tenri,uda,yamatokoriyama,yamatotakada,yamazoe,yoshino<niigata>aga,agano,gosen,itoigawa,izumozaki,joetsu,kamo,kariwa,kashiwazaki,minamiuonuma,mitsuke,muika,murakami,myoko,nagaoka,niigata,ojiya,omi,sado,sanjo,seiro,seirou,sekikawa,shibata,tagami,tainai,tochio,tokamachi,tsubame,tsunan,uonuma,yahiko,yoita,yuzawa<oita>beppu,bungoono,bungotakada,hasama,hiji,himeshima,hita,kamitsue,kokonoe,kuju,kunisaki,kusu,oita,saiki,taketa,tsukumi,usa,usuki,yufu<okayama>akaiwa,asakuchi,bizen,hayashima,ibara,kagamino,kasaoka,kibichuo,kumenan,kurashiki,maniwa,misaki,nagi,niimi,nishiawakura,okayama,satosho,setouchi,shinjo,shoo,soja,takahashi,tamano,tsuyama,wake,yakage<okinawa>aguni,ginowan,ginoza,gushikami,haebaru,higashi,hirara,iheya,ishigaki,ishikawa,itoman,izena,kadena,kin,kitadaito,kitanakagusuku,kumejima,kunigami,minamidaito,motobu,nago,naha,nakagusuku,nakijin,nanjo,nishihara,ogimi,okinawa,onna,shimoji,taketomi,tarama,tokashiki,tomigusuku,tonaki,urasoe,uruma,yaese,yomitan,yonabaru,yonaguni,zamami<osaka>abeno,chihayaakasaka,chuo,daito,fujiidera,habikino,hannan,higashiosaka,higashisumiyoshi,higashiyodogawa,hirakata,ibaraki,ikeda,izumi,izumiotsu,izumisano,kadoma,kaizuka,kanan,kashiwara,katano,kawachinagano,kishiwada,kita,kumatori,matsubara,minato,minoh,misaki,moriguchi,neyagawa,nishi,nose,osakasayama,sakai,sayama,sennan,settsu,shijonawate,shimamoto,suita,tadaoka,taishi,tajiri,takaishi,takatsuki,tondabayashi,toyonaka,toyono,yao<saga>ariake,arita,fukudomi,genkai,hamatama,hizen,imari,kamimine,kanzaki,karatsu,kashima,kitagata,kitahata,kiyama,kouhoku,kyuragi,nishiarita,ogi,omachi,ouchi,saga,shiroishi,taku,tara,tosu,yoshinogari<saitama>arakawa,asaka,chichibu,fujimi,fujimino,fukaya,hanno,hanyu,hasuda,hatogaya,hatoyama,hidaka,higashichichibu,higashimatsuyama,honjo,ina,iruma,iwatsuki,kamiizumi,kamikawa,kamisato,kasukabe,kawagoe,kawaguchi,kawajima,kazo,kitamoto,koshigaya,kounosu,kuki,kumagaya,matsubushi,minano,misato,miyashiro,miyoshi,moroyama,nagatoro,namegawa,niiza,ogano,ogawa,ogose,okegawa,omiya,otaki,ranzan,ryokami,saitama,sakado,satte,sayama,shiki,shiraoka,soka,sugito,toda,tokigawa,tokorozawa,tsurugashima,urawa,warabi,yashio,yokoze,yono,yorii,yoshida,yoshikawa,yoshimi<shiga>aisho,gamo,higashiomi,hikone,koka,konan,kosei,koto,kusatsu,maibara,moriyama,nagahama,nishiazai,notogawa,omihachiman,otsu,ritto,ryuoh,takashima,takatsuki,torahime,toyosato,yasu<shimane>akagi,ama,gotsu,hamada,higashiizumo,hikawa,hikimi,izumo,kakinoki,masuda,matsue,misato,nishinoshima,ohda,okinoshima,okuizumo,shimane,tamayu,tsuwano,unnan,yakumo,yasugi,yatsuka<shizuoka>arai,atami,fuji,fujieda,fujikawa,fujinomiya,fukuroi,gotemba,haibara,hamamatsu,higashiizu,ito,iwata,izu,izunokuni,kakegawa,kannami,kawanehon,kawazu,kikugawa,kosai,makinohara,matsuzaki,minamiizu,mishima,morimachi,nishiizu,numazu,omaezaki,shimada,shimizu,shimoda,shizuoka,susono,yaizu,yoshida<tochigi>ashikaga,bato,haga,ichikai,iwafune,kaminokawa,kanuma,karasuyama,kuroiso,mashiko,mibu,moka,motegi,nasu,nasushiobara,nikko,nishikata,nogi,ohira,ohtawara,oyama,sakura,sano,shimotsuke,shioya,takanezawa,tochigi,tsuga,ujiie,utsunomiya,yaita<tokushima>aizumi,anan,ichiba,itano,kainan,komatsushima,matsushige,mima,minami,miyoshi,mugi,nakagawa,naruto,sanagochi,shishikui,tokushima,wajiki<tokyo>adachi,akiruno,akishima,aogashima,arakawa,bunkyo,chiyoda,chofu,chuo,edogawa,fuchu,fussa,hachijo,hachioji,hamura,higashikurume,higashimurayama,higashiyamato,hino,hinode,hinohara,inagi,itabashi,katsushika,kita,kiyose,kodaira,koganei,kokubunji,komae,koto,kouzushima,kunitachi,machida,meguro,minato,mitaka,mizuho,musashimurayama,musashino,nakano,nerima,ogasawara,okutama,ome,oshima,ota,setagaya,shibuya,shinagawa,shinjuku,suginami,sumida,tachikawa,taito,tama,toshima<tottori>chizu,hino,kawahara,koge,kotoura,misasa,nanbu,nichinan,sakaiminato,tottori,wakasa,yazu,yonago<toyama>asahi,fuchu,fukumitsu,funahashi,himi,imizu,inami,johana,kamiichi,kurobe,nakaniikawa,namerikawa,nanto,nyuzen,oyabe,taira,takaoka,tateyama,toga,tonami,toyama,unazuki,uozu,yamada<wakayama>arida,aridagawa,gobo,hashimoto,hidaka,hirogawa,inami,iwade,kainan,kamitonda,katsuragi,kimino,kinokawa,kitayama,koya,koza,kozagawa,kudoyama,kushimoto,mihama,misato,nachikatsuura,shingu,shirahama,taiji,tanabe,wakayama,yuasa,yura<yamagata>asahi,funagata,higashine,iide,kahoku,kaminoyama,kaneyama,kawanishi,mamurogawa,mikawa,murayama,nagai,nakayama,nanyo,nishikawa,obanazawa,oe,oguni,ohkura,oishida,sagae,sakata,sakegawa,shinjo,shirataka,shonai,takahata,tendo,tozawa,tsuruoka,yamagata,yamanobe,yonezawa,yuza<yamaguchi>abu,hagi,hikari,hofu,iwakuni,kudamatsu,mitou,nagato,oshima,shimonoseki,shunan,tabuse,tokuyama,toyota,ube,yuu<yamanashi>chuo,doshi,fuefuki,fujikawa,fujikawaguchiko,fujiyoshida,hayakawa,hokuto,ichikawamisato,kai,kofu,koshu,kosuge,minami-alps,minobu,nakamichi,nanbu,narusawa,nirasaki,nishikatsura,oshino,otsuki,showa,tabayama,tsuru,uenohara,yamanakako,yamanashi<xn--ehqz56n,xn--1lqs03n,xn--qqqt11m,xn--f6qx53a,xn--djrs72d6uy,xn--mkru45i,xn--0trq7p7nn,xn--5js045d,xn--kbrq7o,xn--pssu33l,xn--ntsq17g,xn--uisz3g,xn--6btw5a,xn--1ctwo,xn--6orx2r,xn--rht61e,xn--rht27z,xn--nit225k,xn--rht3d,xn--djty4k,xn--klty5x,xn--kltx9a,xn--kltp7d,xn--c3s14m,xn--vgu402c,xn--efvn9s,xn--1lqs71d,xn--4pvxs,xn--uuwu58a,xn--zbx025d,xn--8pvr4u,xn--5rtp49c,xn--ntso0iqx3a,xn--elqq16h,xn--4it168d,xn--klt787d,xn--rny31h,xn--7t0a264c,xn--uist22h,xn--8ltr62k,xn--2m4a15e,xn--32vp30h,xn--4it797k,xn--5rtq34k,xn--k7yn95e,xn--tor131o,xn--d5qv7z876c,kawasaki>*,!city<kitakyushu>*,!city<kobe>*,!city<nagoya>*,!city<sapporo>*,!city<sendai>*,!city<yokohama>*,!city<<ke>ac,co,go,info,me,mobi,ne,or,sc<kg>com,edu,gov,mil,net,org<kh>com,edu,gov,net,org<ki>biz,com,edu,gov,info,net,org<km>ass,com,edu,gov,mil,nom,org,prd,tm,asso,coop,gouv,medecin,notaires,pharmaciens,presse,veterinaire<kn>edu,gov,net,org<kp>com,edu,gov,org,rep,tra<kr>ac,ai,co,es,go,hs,io,it,kg,me,mil,ms,ne,or,pe,re,sc,busan,chungbuk,chungnam,daegu,daejeon,gangwon,gwangju,gyeongbuk,gyeonggi,gyeongnam,incheon,jeju,jeonbuk,jeonnam,seoul,ulsan<kw>com,edu,emb,gov,ind,net,org<ky>com,edu,net,org<kz>com,edu,gov,mil,net,org<la>com,edu,gov,info,int,net,org,per<lb>com,edu,gov,net,org<lc>co,com,edu,gov,net,org<li,lk>ac,assn,com,edu,gov,grp,hotel,int,ltd,net,ngo,org,sch,soc,web<lr>com,edu,gov,net,org<ls>ac,biz,co,edu,gov,info,net,org,sc<lt>gov<lu,lv>asn,com,conf,edu,gov,id,mil,net,org<ly>com,edu,gov,id,med,net,org,plc,sch<ma>ac,co,gov,net,org,press<mc>asso,tm<md,me>ac,co,edu,gov,its,net,org,priv<mg>co,com,edu,gov,mil,nom,org,prd<mh,mil,mk>com,edu,gov,inf,name,net,org<ml>ac,art,asso,com,edu,gouv,gov,info,inst,net,org,pr,presse<mm>*<mn>edu,gov,org<mo>com,edu,gov,net,org<mobi,mp,mq,mr>gov<ms>com,edu,gov,net,org<mt>com,edu,net,org<mu>ac,co,com,gov,net,or,org<museum,mv>aero,biz,com,coop,edu,gov,info,int,mil,museum,name,net,org,pro<mw>ac,biz,co,com,coop,edu,gov,int,net,org<mx>com,edu,gob,net,org<my>biz,com,edu,gov,mil,name,net,org<mz>ac,adv,co,edu,gov,mil,net,org<na>alt,co,com,gov,net,org<name,nc>asso,nom<ne,net,nf>arts,com,firm,info,net,other,per,rec,store,web<ng>com,edu,gov,i,mil,mobi,name,net,org,sch<ni>ac,biz,co,com,edu,gob,in,info,int,mil,net,nom,org,web<nl,no>fhs,folkebibl,fylkesbibl,idrett,museum,priv,vgs,dep,herad,kommune,mil,stat,aa>gs<ah>gs<bu>gs<fm>gs<hl>gs<hm>gs<jan-mayen>gs<mr>gs<nl>gs<nt>gs<of>gs<ol>gs<oslo>gs<rl>gs<sf>gs<st>gs<svalbard>gs<tm>gs<tr>gs<va>gs<vf>gs<akrehamn,xn--krehamn-dxa,algard,xn--lgrd-poac,arna,bronnoysund,xn--brnnysund-m8ac,brumunddal,bryne,drobak,xn--drbak-wua,egersund,fetsund,floro,xn--flor-jra,fredrikstad,hokksund,honefoss,xn--hnefoss-q1a,jessheim,jorpeland,xn--jrpeland-54a,kirkenes,kopervik,krokstadelva,langevag,xn--langevg-jxa,leirvik,mjondalen,xn--mjndalen-64a,mo-i-rana,mosjoen,xn--mosjen-eya,nesoddtangen,orkanger,osoyro,xn--osyro-wua,raholt,xn--rholt-mra,sandnessjoen,xn--sandnessjen-ogb,skedsmokorset,slattum,spjelkavik,stathelle,stavern,stjordalshalsen,xn--stjrdalshalsen-sqb,tananger,tranby,vossevangen,aarborte,aejrie,afjord,xn--fjord-lra,agdenes,akershus>nes<aknoluokta,xn--koluokta-7ya57h,al,xn--l-1fa,alaheadju,xn--laheadju-7ya,alesund,xn--lesund-hua,alstahaug,alta,xn--lt-liac,alvdal,amli,xn--mli-tla,amot,xn--mot-tla,andasuolo,andebu,andoy,xn--andy-ira,ardal,xn--rdal-poa,aremark,arendal,xn--s-1fa,aseral,xn--seral-lra,asker,askim,askoy,xn--asky-ira,askvoll,asnes,xn--snes-poa,audnedaln,aukra,aure,aurland,aurskog-holand,xn--aurskog-hland-jnb,austevoll,austrheim,averoy,xn--avery-yua,badaddja,xn--bdddj-mrabd,xn--brum-voa,bahcavuotna,xn--bhcavuotna-s4a,bahccavuotna,xn--bhccavuotna-k7a,baidar,xn--bidr-5nac,bajddar,xn--bjddar-pta,balat,xn--blt-elab,balestrand,ballangen,balsfjord,bamble,bardu,barum,batsfjord,xn--btsfjord-9za,bearalvahki,xn--bearalvhki-y4a,beardu,beiarn,berg,bergen,berlevag,xn--berlevg-jxa,bievat,xn--bievt-0qa,bindal,birkenes,bjerkreim,bjugn,bodo,xn--bod-2na,bokn,bomlo,xn--bmlo-gra,bremanger,bronnoy,xn--brnny-wuac,budejju,buskerud>nes<bygland,bykle,cahcesuolo,xn--hcesuolo-7ya35b,davvenjarga,xn--davvenjrga-y4a,davvesiida,deatnu,dielddanuorri,divtasvuodna,divttasvuotna,donna,xn--dnna-gra,dovre,drammen,drangedal,dyroy,xn--dyry-ira,eid,eidfjord,eidsberg,eidskog,eidsvoll,eigersund,elverum,enebakk,engerdal,etne,etnedal,evenassi,xn--eveni-0qa01ga,evenes,evje-og-hornnes,farsund,fauske,fedje,fet,finnoy,xn--finny-yua,fitjar,fjaler,fjell,fla,xn--fl-zia,flakstad,flatanger,flekkefjord,flesberg,flora,folldal,forde,xn--frde-gra,forsand,fosnes,xn--frna-woa,frana,frei,frogn,froland,frosta,froya,xn--frya-hra,fuoisku,fuossko,fusa,fyresdal,gaivuotna,xn--givuotna-8ya,galsa,xn--gls-elac,gamvik,gangaviika,xn--ggaviika-8ya47h,gaular,gausdal,giehtavuoatna,gildeskal,xn--gildeskl-g0a,giske,gjemnes,gjerdrum,gjerstad,gjesdal,gjovik,xn--gjvik-wua,gloppen,gol,gran,grane,granvin,gratangen,grimstad,grong,grue,gulen,guovdageaidnu,ha,xn--h-2fa,habmer,xn--hbmer-xqa,hadsel,xn--hgebostad-g3a,hagebostad,halden,halsa,hamar,hamaroy,hammarfeasta,xn--hmmrfeasta-s4ac,hammerfest,hapmir,xn--hpmir-xqa,haram,hareid,harstad,hasvik,hattfjelldal,haugesund,hedmark>os,valer,xn--vler-qoa<hemne,hemnes,hemsedal,hitra,hjartdal,hjelmeland,hobol,xn--hobl-ira,hof,hol,hole,holmestrand,holtalen,xn--holtlen-hxa,hordaland>os<hornindal,horten,hoyanger,xn--hyanger-q1a,hoylandet,xn--hylandet-54a,hurdal,hurum,hvaler,hyllestad,ibestad,inderoy,xn--indery-fya,iveland,ivgu,jevnaker,jolster,xn--jlster-bya,jondal,kafjord,xn--kfjord-iua,karasjohka,xn--krjohka-hwab49j,karasjok,karlsoy,karmoy,xn--karmy-yua,kautokeino,klabu,xn--klbu-woa,klepp,kongsberg,kongsvinger,kraanghke,xn--kranghke-b0a,kragero,xn--krager-gya,kristiansand,kristiansund,krodsherad,xn--krdsherad-m8a,xn--kvfjord-nxa,xn--kvnangen-k0a,kvafjord,kvalsund,kvam,kvanangen,kvinesdal,kvinnherad,kviteseid,kvitsoy,xn--kvitsy-fya,laakesvuemie,xn--lrdal-sra,lahppi,xn--lhppi-xqa,lardal,larvik,lavagis,lavangen,leangaviika,xn--leagaviika-52b,lebesby,leikanger,leirfjord,leka,leksvik,lenvik,lerdal,lesja,levanger,lier,lierne,lillehammer,lillesand,lindas,xn--linds-pra,lindesnes,loabat,xn--loabt-0qa,lodingen,xn--ldingen-q1a,lom,loppa,lorenskog,xn--lrenskog-54a,loten,xn--lten-gra,lund,lunner,luroy,xn--lury-ira,luster,lyngdal,lyngen,malatvuopmi,xn--mlatvuopmi-s4a,malselv,xn--mlselv-iua,malvik,mandal,marker,marnardal,masfjorden,masoy,xn--msy-ula0h,matta-varjjat,xn--mtta-vrjjat-k7af,meland,meldal,melhus,meloy,xn--mely-ira,meraker,xn--merker-kua,midsund,midtre-gauldal,moareke,xn--moreke-jua,modalen,modum,molde,more-og-romsdal>heroy,sande<xn--mre-og-romsdal-qqb>xn--hery-ira,sande<moskenes,moss,muosat,xn--muost-0qa,naamesjevuemie,xn--nmesjevuemie-tcba,xn--nry-yla5g,namdalseid,namsos,namsskogan,nannestad,naroy,narviika,narvik,naustdal,navuotna,xn--nvuotna-hwa,nedre-eiker,nesna,nesodden,nesseby,nesset,nissedal,nittedal,nord-aurdal,nord-fron,nord-odal,norddal,nordkapp,nordland>bo,xn--b-5ga,heroy,xn--hery-ira<nordre-land,nordreisa,nore-og-uvdal,notodden,notteroy,xn--nttery-byae,odda,oksnes,xn--ksnes-uua,omasvuotna,oppdal,oppegard,xn--oppegrd-ixa,orkdal,orland,xn--rland-uua,orskog,xn--rskog-uua,orsta,xn--rsta-fra,osen,osteroy,xn--ostery-fya,ostfold>valer<xn--stfold-9xa>xn--vler-qoa<ostre-toten,xn--stre-toten-zcb,overhalla,ovre-eiker,xn--vre-eiker-k8a,oyer,xn--yer-zna,oygarden,xn--ygarden-p1a,oystre-slidre,xn--ystre-slidre-ujb,porsanger,porsangu,xn--porsgu-sta26f,porsgrunn,rade,xn--rde-ula,radoy,xn--rady-ira,xn--rlingen-mxa,rahkkeravju,xn--rhkkervju-01af,raisa,xn--risa-5na,rakkestad,ralingen,rana,randaberg,rauma,rendalen,rennebu,rennesoy,xn--rennesy-v1a,rindal,ringebu,ringerike,ringsaker,risor,xn--risr-ira,rissa,roan,rodoy,xn--rdy-0nab,rollag,romsa,romskog,xn--rmskog-bya,roros,xn--rros-gra,rost,xn--rst-0na,royken,xn--ryken-vua,royrvik,xn--ryrvik-bya,ruovat,rygge,salangen,salat,xn--slat-5na,xn--slt-elab,saltdal,samnanger,sandefjord,sandnes,sandoy,xn--sandy-yua,sarpsborg,sauda,sauherad,sel,selbu,selje,seljord,siellak,sigdal,siljan,sirdal,skanit,xn--sknit-yqa,skanland,xn--sknland-fxa,skaun,skedsmo,ski,skien,skierva,xn--skierv-uta,skiptvet,skjak,xn--skjk-soa,skjervoy,xn--skjervy-v1a,skodje,smola,xn--smla-hra,snaase,xn--snase-nra,snasa,xn--snsa-roa,snillfjord,snoasa,sogndal,sogne,xn--sgne-gra,sokndal,sola,solund,somna,xn--smna-gra,sondre-land,xn--sndre-land-0cb,songdalen,sor-aurdal,xn--sr-aurdal-l8a,sor-fron,xn--sr-fron-q1a,sor-odal,xn--sr-odal-q1a,sor-varanger,xn--sr-varanger-ggb,sorfold,xn--srfold-bya,sorreisa,xn--srreisa-q1a,sortland,sorum,xn--srum-gra,spydeberg,stange,stavanger,steigen,steinkjer,stjordal,xn--stjrdal-s1a,stokke,stor-elvdal,stord,stordal,storfjord,strand,stranda,stryn,sula,suldal,sund,sunndal,surnadal,sveio,svelvik,sykkylven,tana,telemark>bo,xn--b-5ga<time,tingvoll,tinn,tjeldsund,tjome,xn--tjme-hra,tokke,tolga,tonsberg,xn--tnsberg-q1a,torsken,xn--trna-woa,trana,tranoy,xn--trany-yua,troandin,trogstad,xn--trgstad-r1a,tromsa,tromso,xn--troms-zua,trondheim,trysil,tvedestrand,tydal,tynset,tysfjord,tysnes,xn--tysvr-vra,tysvar,ullensaker,ullensvang,ulvik,unjarga,xn--unjrga-rta,utsira,vaapste,vadso,xn--vads-jra,xn--vry-yla5g,vaga,xn--vg-yiab,vagan,xn--vgan-qoa,vagsoy,xn--vgsy-qoa0j,vaksdal,valle,vang,vanylven,vardo,xn--vard-jra,varggat,xn--vrggt-xqad,varoy,vefsn,vega,vegarshei,xn--vegrshei-c0a,vennesla,verdal,verran,vestby,vestfold>sande<vestnes,vestre-slidre,vestre-toten,vestvagoy,xn--vestvgy-ixa6o,vevelstad,vik,vikna,vindafjord,voagat,volda,voss<np>*<nr>biz,com,edu,gov,info,net,org<nu,nz>ac,co,cri,geek,gen,govt,health,iwi,kiwi,maori,xn--mori-qsa,mil,net,org,parliament,school<om>co,com,edu,gov,med,museum,net,org,pro<onion,org,pa>abo,ac,com,edu,gob,ing,med,net,nom,org,sld<pe>com,edu,gob,mil,net,nom,org<pf>com,edu,org<pg>*<ph>com,edu,gov,i,mil,net,ngo,org<pk>ac,biz,com,edu,fam,gkp,gob,gog,gok,gop,gos,gov,net,org,web<pl>com,net,org,agro,aid,atm,auto,biz,edu,gmina,gsm,info,mail,media,miasta,mil,nieruchomosci,nom,pc,powiat,priv,realestate,rel,sex,shop,sklep,sos,szkola,targi,tm,tourism,travel,turystyka,gov>ap,griw,ic,is,kmpsp,konsulat,kppsp,kwp,kwpsp,mup,mw,oia,oirm,oke,oow,oschr,oum,pa,pinb,piw,po,pr,psp,psse,pup,rzgw,sa,sdn,sko,so,sr,starostwo,ug,ugim,um,umig,upow,uppo,us,uw,uzs,wif,wiih,winb,wios,witd,wiw,wkz,wsa,wskr,wsse,wuoz,wzmiuw,zp,zpisdn<augustow,babia-gora,bedzin,beskidy,bialowieza,bialystok,bielawa,bieszczady,boleslawiec,bydgoszcz,bytom,cieszyn,czeladz,czest,dlugoleka,elblag,elk,glogow,gniezno,gorlice,grajewo,ilawa,jaworzno,jelenia-gora,jgora,kalisz,karpacz,kartuzy,kaszuby,katowice,kazimierz-dolny,kepno,ketrzyn,klodzko,kobierzyce,kolobrzeg,konin,konskowola,kutno,lapy,lebork,legnica,lezajsk,limanowa,lomza,lowicz,lubin,lukow,malbork,malopolska,mazowsze,mazury,mielec,mielno,mragowo,naklo,nowaruda,nysa,olawa,olecko,olkusz,olsztyn,opoczno,opole,ostroda,ostroleka,ostrowiec,ostrowwlkp,pila,pisz,podhale,podlasie,polkowice,pomorskie,pomorze,prochowice,pruszkow,przeworsk,pulawy,radom,rawa-maz,rybnik,rzeszow,sanok,sejny,skoczow,slask,slupsk,sosnowiec,stalowa-wola,starachowice,stargard,suwalki,swidnica,swiebodzin,swinoujscie,szczecin,szczytno,tarnobrzeg,tgory,turek,tychy,ustka,walbrzych,warmia,warszawa,waw,wegrow,wielun,wlocl,wloclawek,wodzislaw,wolomin,wroclaw,zachpomor,zagan,zarow,zgora,zgorzelec<pm,pn>co,edu,gov,net,org<post,pr>biz,com,edu,gov,info,isla,name,net,org,pro,ac,est,prof<pro>aaa,aca,acct,avocat,bar,cpa,eng,jur,law,med,recht<ps>com,edu,gov,net,org,plo,sec<pt>com,edu,gov,int,net,nome,org,publ<pw>gov<py>com,coop,edu,gov,mil,net,org<qa>com,edu,gov,mil,name,net,org,sch<re>asso,com<ro>arts,com,firm,info,nom,nt,org,rec,store,tm,www<rs>ac,co,edu,gov,in,org<ru,rw>ac,co,coop,gov,mil,net,org<sa>com,edu,gov,med,net,org,pub,sch<sb>com,edu,gov,net,org<sc>com,edu,gov,net,org<sd>com,edu,gov,info,med,net,org,tv<se>a,ac,b,bd,brand,c,d,e,f,fh,fhsk,fhv,g,h,i,k,komforb,kommunalforbund,komvux,l,lanbib,m,n,naturbruksgymn,o,org,p,parti,pp,press,r,s,t,tm,u,w,x,y,z<sg>com,edu,gov,net,org<sh>com,gov,mil,net,org<si,sj,sk>org<sl>com,edu,gov,net,org<sm,sn>art,com,edu,gouv,org,univ<so>com,edu,gov,me,net,org<sr,ss>biz,co,com,edu,gov,me,net,org,sch<st>co,com,consulado,edu,embaixada,mil,net,org,principe,saotome,store<su,sv>com,edu,gob,org,red<sx>gov<sy>com,edu,gov,mil,net,org<sz>ac,co,org<tc,td,tel,tf,tg,th>ac,co,go,in,mi,net,or<tj>ac,biz,co,com,edu,go,gov,int,mil,name,net,nic,org,test,web<tk,tl>gov<tm>co,com,edu,gov,mil,net,nom,org<tn>com,ens,fin,gov,ind,info,intl,mincom,nat,net,org,perso,tourism<to>com,edu,gov,mil,net,org<tr>av,bbs,bel,biz,com,dr,edu,gen,gov,info,k12,kep,mil,name,net,org,pol,tel,tsk,tv,web,nc>gov<<tt>biz,co,com,edu,gov,info,mil,name,net,org,pro<tv,tw>club,com,ebiz,edu,game,gov,idv,mil,net,org<tz>ac,co,go,hotel,info,me,mil,mobi,ne,or,sc,tv<ua>com,edu,gov,in,net,org,cherkassy,cherkasy,chernigov,chernihiv,chernivtsi,chernovtsy,ck,cn,cr,crimea,cv,dn,dnepropetrovsk,dnipropetrovsk,donetsk,dp,if,ivano-frankivsk,kh,kharkiv,kharkov,kherson,khmelnitskiy,khmelnytskyi,kiev,kirovograd,km,kr,kropyvnytskyi,krym,ks,kv,kyiv,lg,lt,lugansk,luhansk,lutsk,lv,lviv,mk,mykolaiv,nikolaev,od,odesa,odessa,pl,poltava,rivne,rovno,rv,sb,sebastopol,sevastopol,sm,sumy,te,ternopil,uz,uzhgorod,uzhhorod,vinnica,vinnytsia,vn,volyn,yalta,zakarpattia,zaporizhzhe,zaporizhzhia,zhitomir,zhytomyr,zp,zt<ug>ac,co,com,edu,go,gov,mil,ne,or,org,sc,us<uk>ac,co,gov,ltd,me,net,nhs,org,plc,police,sch>*<<us>dni,isa,nsn,ak>k12,cc,lib<al>k12,cc,lib<ar>k12,cc,lib<as>k12,cc,lib<az>k12,cc,lib<ca>k12,cc,lib<co>k12,cc,lib<ct>k12,cc,lib<dc>k12,cc,lib<de>cc<fl>k12,cc,lib<ga>k12,cc,lib<gu>k12,cc,lib<hi>cc,lib<ia>k12,cc,lib<id>k12,cc,lib<il>k12,cc,lib<in>k12,cc,lib<ks>k12,cc,lib<ky>k12,cc,lib<la>k12,cc,lib<ma>k12>chtr,paroch,pvt<cc,lib<md>k12,cc,lib<me>k12,cc,lib<mi>k12,cc,lib,ann-arbor,cog,dst,eaton,gen,mus,tec,washtenaw<mn>k12,cc,lib<mo>k12,cc,lib<ms>k12,cc<mt>k12,cc,lib<nc>k12,cc,lib<nd>cc,lib<ne>k12,cc,lib<nh>k12,cc,lib<nj>k12,cc,lib<nm>k12,cc,lib<nv>k12,cc,lib<ny>k12,cc,lib<oh>k12,cc,lib<ok>k12,cc,lib<or>k12,cc,lib<pa>k12,cc,lib<pr>k12,cc,lib<ri>cc,lib<sc>k12,cc,lib<sd>cc,lib<tn>k12,cc,lib<tx>k12,cc,lib<ut>k12,cc,lib<va>k12,cc,lib<vi>k12,cc,lib<vt>k12,cc,lib<wa>k12,cc,lib<wi>k12,cc,lib<wv>cc<wy>cc,k12,lib<<uy>com,edu,gub,mil,net,org<uz>co,com,net,org<va,vc>com,edu,gov,mil,net,org<ve>arts,bib,co,com,e12,edu,emprende,firm,gob,gov,ia,info,int,mil,net,nom,org,rar,rec,store,tec,web<vg>edu<vi>co,com,k12,net,org<vn>ac,ai,biz,com,edu,gov,health,id,info,int,io,name,net,org,pro,angiang,bacgiang,backan,baclieu,bacninh,baria-vungtau,bentre,binhdinh,binhduong,binhphuoc,binhthuan,camau,cantho,caobang,daklak,daknong,danang,dienbien,dongnai,dongthap,gialai,hagiang,haiduong,haiphong,hanam,hanoi,hatinh,haugiang,hoabinh,hue,hungyen,khanhhoa,kiengiang,kontum,laichau,lamdong,langson,laocai,longan,namdinh,nghean,ninhbinh,ninhthuan,phutho,phuyen,quangbinh,quangnam,quangngai,quangninh,quangtri,soctrang,sonla,tayninh,thaibinh,thainguyen,thanhhoa,thanhphohochiminh,thuathienhue,tiengiang,travinh,tuyenquang,vinhlong,vinhphuc,yenbai<vu>com,edu,net,org<wf,ws>com,edu,gov,net,org<yt,xn--mgbaam7a8h,xn--y9a3aq,xn--54b7fta0cc,xn--90ae,xn--mgbcpq6gpa1a,xn--90ais,xn--fiqs8s,xn--fiqz9s,xn--lgbbat1ad8j,xn--wgbh1c,xn--e1a4c,xn--qxa6a,xn--mgbah1a3hjkrd,xn--node,xn--qxam,xn--j6w193g>xn--gmqw5a,xn--55qx5d,xn--mxtq1m,xn--wcvs22d,xn--uc0atv,xn--od0alg<xn--2scrj9c,xn--3hcrj9c,xn--45br5cyl,xn--h2breg3eve,xn--h2brj9c8c,xn--mgbgu82a,xn--rvc1e0am3e,xn--h2brj9c,xn--mgbbh1a,xn--mgbbh1a71e,xn--fpcrj9c3d,xn--gecrj9c,xn--s9brj9c,xn--45brj9c,xn--xkc2dl3a5ee0h,xn--mgba3a4f16a,xn--mgba3a4fra,xn--mgbtx2b,xn--mgbayh7gpa,xn--3e0b707e,xn--80ao21a,xn--q7ce6a,xn--fzc2c9e2c,xn--xkc2al3hye2a,xn--mgbc0a9azcg,xn--d1alf,xn--l1acc,xn--mix891f,xn--mix082f,xn--mgbx4cd0ab,xn--mgb9awbf,xn--mgbai9azgqp6j,xn--mgbai9a5eva00b,xn--ygbi2ammx,xn--90a3ac>xn--80au,xn--90azh,xn--d1at,xn--c1avg,xn--o1ac,xn--o1ach<xn--p1ai,xn--wgbl6a,xn--mgberp4a5d4ar,xn--mgberp4a5d4a87g,xn--mgbqly7c0a67fbc,xn--mgbqly7cvafr,xn--mgbpl2fh,xn--yfro4i67o,xn--clchc0ea0b2g2a9gcd,xn--ogbpf8fl,xn--mgbtf8fl,xn--o3cw4h>xn--o3cyx2a,xn--12co0c3b4eva,xn--m3ch0j3a,xn--h3cuzk1di,xn--12c1fe0br,xn--12cfi8ixb8l<xn--pgbs0dh,xn--kpry57d,xn--kprw13d,xn--nnx388a,xn--j1amh,xn--mgb2ddes,xxx,ye>com,edu,gov,mil,net,org<za>ac,agric,alt,co,edu,gov,grondar,law,mil,net,ngo,nic,nis,nom,org,school,tm,web<zm>ac,biz,co,com,edu,gov,info,mil,net,org,sch<zw>ac,co,gov,mil,org<aaa,aarp,abb,abbott,abbvie,abc,able,abogado,abudhabi,academy,accenture,accountant,accountants,aco,actor,ads,adult,aeg,aetna,afl,africa,agakhan,agency,aig,airbus,airforce,airtel,akdn,alibaba,alipay,allfinanz,allstate,ally,alsace,alstom,amazon,americanexpress,americanfamily,amex,amfam,amica,amsterdam,analytics,android,anquan,anz,aol,apartments,app,apple,aquarelle,arab,aramco,archi,army,art,arte,asda,associates,athleta,attorney,auction,audi,audible,audio,auspost,author,auto,autos,aws,axa,azure,baby,baidu,banamex,band,bank,bar,barcelona,barclaycard,barclays,barefoot,bargains,baseball,basketball,bauhaus,bayern,bbc,bbt,bbva,bcg,bcn,beats,beauty,beer,berlin,best,bestbuy,bet,bharti,bible,bid,bike,bing,bingo,bio,black,blackfriday,blockbuster,blog,bloomberg,blue,bms,bmw,bnpparibas,boats,boehringer,bofa,bom,bond,boo,book,booking,bosch,bostik,boston,bot,boutique,box,bradesco,bridgestone,broadway,broker,brother,brussels,build,builders,business,buy,buzz,bzh,cab,cafe,cal,call,calvinklein,cam,camera,camp,canon,capetown,capital,capitalone,car,caravan,cards,care,career,careers,cars,casa,case,cash,casino,catering,catholic,cba,cbn,cbre,center,ceo,cern,cfa,cfd,chanel,channel,charity,chase,chat,cheap,chintai,christmas,chrome,church,cipriani,circle,cisco,citadel,citi,citic,city,claims,cleaning,click,clinic,clinique,clothing,cloud,club,clubmed,coach,codes,coffee,college,cologne,commbank,community,company,compare,computer,comsec,condos,construction,consulting,contact,contractors,cooking,cool,corsica,country,coupon,coupons,courses,cpa,credit,creditcard,creditunion,cricket,crown,crs,cruise,cruises,cuisinella,cymru,cyou,dad,dance,data,date,dating,datsun,day,dclk,dds,deal,dealer,deals,degree,delivery,dell,deloitte,delta,democrat,dental,dentist,desi,design,dev,dhl,diamonds,diet,digital,direct,directory,discount,discover,dish,diy,dnp,docs,doctor,dog,domains,dot,download,drive,dtv,dubai,dupont,durban,dvag,dvr,earth,eat,eco,edeka,education,email,emerck,energy,engineer,engineering,enterprises,epson,equipment,ericsson,erni,esq,estate,eurovision,eus,events,exchange,expert,exposed,express,extraspace,fage,fail,fairwinds,faith,family,fan,fans,farm,farmers,fashion,fast,fedex,feedback,ferrari,ferrero,fidelity,fido,film,final,finance,financial,fire,firestone,firmdale,fish,fishing,fit,fitness,flickr,flights,flir,florist,flowers,fly,foo,food,football,ford,forex,forsale,forum,foundation,fox,free,fresenius,frl,frogans,frontier,ftr,fujitsu,fun,fund,furniture,futbol,fyi,gal,gallery,gallo,gallup,game,games,gap,garden,gay,gbiz,gdn,gea,gent,genting,george,ggee,gift,gifts,gives,giving,glass,gle,global,globo,gmail,gmbh,gmo,gmx,godaddy,gold,goldpoint,golf,goodyear,goog,google,gop,got,grainger,graphics,gratis,green,gripe,grocery,group,gucci,guge,guide,guitars,guru,hair,hamburg,hangout,haus,hbo,hdfc,hdfcbank,health,healthcare,help,helsinki,here,hermes,hiphop,hisamitsu,hitachi,hiv,hkt,hockey,holdings,holiday,homedepot,homegoods,homes,homesense,honda,horse,hospital,host,hosting,hot,hotel,hotels,hotmail,house,how,hsbc,hughes,hyatt,hyundai,ibm,icbc,ice,icu,ieee,ifm,ikano,imamat,imdb,immo,immobilien,inc,industries,infiniti,ing,ink,institute,insurance,insure,international,intuit,investments,ipiranga,irish,ismaili,ist,istanbul,itau,itv,jaguar,java,jcb,jeep,jetzt,jewelry,jio,jll,jmp,jnj,joburg,jot,joy,jpmorgan,jprs,juegos,juniper,kaufen,kddi,kerryhotels,kerryproperties,kfh,kia,kids,kim,kindle,kitchen,kiwi,koeln,komatsu,kosher,kpmg,kpn,krd,kred,kuokgroup,kyoto,lacaixa,lamborghini,lamer,land,landrover,lanxess,lasalle,lat,latino,latrobe,law,lawyer,lds,lease,leclerc,lefrak,legal,lego,lexus,lgbt,lidl,life,lifeinsurance,lifestyle,lighting,like,lilly,limited,limo,lincoln,link,live,living,llc,llp,loan,loans,locker,locus,lol,london,lotte,lotto,love,lpl,lplfinancial,ltd,ltda,lundbeck,luxe,luxury,madrid,maif,maison,makeup,man,management,mango,map,market,marketing,markets,marriott,marshalls,mattel,mba,mckinsey,med,media,meet,melbourne,meme,memorial,men,menu,merck,merckmsd,miami,microsoft,mini,mint,mit,mitsubishi,mlb,mls,mma,mobile,moda,moe,moi,mom,monash,money,monster,mormon,mortgage,moscow,moto,motorcycles,mov,movie,msd,mtn,mtr,music,nab,nagoya,navy,nba,nec,netbank,netflix,network,neustar,new,news,next,nextdirect,nexus,nfl,ngo,nhk,nico,nike,nikon,ninja,nissan,nissay,nokia,norton,now,nowruz,nowtv,nra,nrw,ntt,nyc,obi,observer,office,okinawa,olayan,olayangroup,ollo,omega,one,ong,onl,online,ooo,open,oracle,orange,organic,origins,osaka,otsuka,ott,ovh,page,panasonic,paris,pars,partners,parts,party,pay,pccw,pet,pfizer,pharmacy,phd,philips,phone,photo,photography,photos,physio,pics,pictet,pictures,pid,pin,ping,pink,pioneer,pizza,place,play,playstation,plumbing,plus,pnc,pohl,poker,politie,porn,praxi,press,prime,prod,productions,prof,progressive,promo,properties,property,protection,pru,prudential,pub,pwc,qpon,quebec,quest,racing,radio,read,realestate,realtor,realty,recipes,red,redumbrella,rehab,reise,reisen,reit,reliance,ren,rent,rentals,repair,report,republican,rest,restaurant,review,reviews,rexroth,rich,richardli,ricoh,ril,rio,rip,rocks,rodeo,rogers,room,rsvp,rugby,ruhr,run,rwe,ryukyu,saarland,safe,safety,sakura,sale,salon,samsclub,samsung,sandvik,sandvikcoromant,sanofi,sap,sarl,sas,save,saxo,sbi,sbs,scb,schaeffler,schmidt,scholarships,school,schule,schwarz,science,scot,search,seat,secure,security,seek,select,sener,services,seven,sew,sex,sexy,sfr,shangrila,sharp,shell,shia,shiksha,shoes,shop,shopping,shouji,show,silk,sina,singles,site,ski,skin,sky,skype,sling,smart,smile,sncf,soccer,social,softbank,software,sohu,solar,solutions,song,sony,soy,spa,space,sport,spot,srl,stada,staples,star,statebank,statefarm,stc,stcgroup,stockholm,storage,store,stream,studio,study,style,sucks,supplies,supply,support,surf,surgery,suzuki,swatch,swiss,sydney,systems,tab,taipei,talk,taobao,target,tatamotors,tatar,tattoo,tax,taxi,tci,tdk,team,tech,technology,temasek,tennis,teva,thd,theater,theatre,tiaa,tickets,tienda,tips,tires,tirol,tjmaxx,tjx,tkmaxx,tmall,today,tokyo,tools,top,toray,toshiba,total,tours,town,toyota,toys,trade,trading,training,travel,travelers,travelersinsurance,trust,trv,tube,tui,tunes,tushu,tvs,ubank,ubs,unicom,university,uno,uol,ups,vacations,vana,vanguard,vegas,ventures,verisign,versicherung,vet,viajes,video,vig,viking,villas,vin,vip,virgin,visa,vision,viva,vivo,vlaanderen,vodka,volvo,vote,voting,voto,voyage,wales,walmart,walter,wang,wanggou,watch,watches,weather,weatherchannel,webcam,weber,website,wed,wedding,weibo,weir,whoswho,wien,wiki,williamhill,win,windows,wine,winners,wme,woodside,work,works,world,wow,wtc,wtf,xbox,xerox,xihuan,xin,xn--11b4c3d,xn--1ck2e1b,xn--1qqw23a,xn--30rr7y,xn--3bst00m,xn--3ds443g,xn--3pxu8k,xn--42c2d9a,xn--45q11c,xn--4gbrim,xn--55qw42g,xn--55qx5d,xn--5su34j936bgsg,xn--5tzm5g,xn--6frz82g,xn--6qq986b3xl,xn--80adxhks,xn--80aqecdr1a,xn--80asehdb,xn--80aswg,xn--8y0a063a,xn--9dbq2a,xn--9et52u,xn--9krt00a,xn--b4w605ferd,xn--bck1b9a5dre4c,xn--c1avg,xn--c2br7g,xn--cck2b3b,xn--cckwcxetd,xn--cg4bki,xn--czr694b,xn--czrs0t,xn--czru2d,xn--d1acj3b,xn--eckvdtc9d,xn--efvy88h,xn--fct429k,xn--fhbei,xn--fiq228c5hs,xn--fiq64b,xn--fjq720a,xn--flw351e,xn--fzys8d69uvgm,xn--g2xx48c,xn--gckr3f0f,xn--gk3at1e,xn--hxt814e,xn--i1b6b1a6a2e,xn--imr513n,xn--io0a7i,xn--j1aef,xn--jlq480n2rg,xn--jvr189m,xn--kcrx77d1x4a,xn--kput3i,xn--mgba3a3ejt,xn--mgba7c0bbn0a,xn--mgbab2bd,xn--mgbca7dzdo,xn--mgbi4ecexp,xn--mgbt3dhd,xn--mk1bu44c,xn--mxtq1m,xn--ngbc5azd,xn--ngbe9e0a,xn--ngbrx,xn--nqv7f,xn--nqv7fs00ema,xn--nyqy26a,xn--otu796d,xn--p1acf,xn--pssy2u,xn--q9jyb4c,xn--qcka1pmc,xn--rhqv96g,xn--rovu88b,xn--ses554g,xn--t60b56a,xn--tckwe,xn--tiq49xqyj,xn--unup4y,xn--vermgensberater-ctb,xn--vermgensberatung-pwb,xn--vhquv,xn--vuq861b,xn--w4r85el8fhu5dnra,xn--w4rs40l,xn--xhq521b,xn--zfr164b,xyz,yachts,yahoo,yamaxun,yandex,yodobashi,yoga,yokohama,you,youtube,yun,zappos,zara,zero,zip,zone,zuerich";
+
+// node_modules/parse-domain/serialized-tries/private.js
+var private_default = "krd>co,edu<pl>art,gliwice,krakow,poznan,wroc,zakopane,beep,ecommerce-shop,cfolks,dfirma,dkonto,you2,shoparena,homesklep,sdscloud,unicloud,lodz,pabianice,plock,sieradz,skierniewice,zgierz,krasnik,leczna,lubartow,lublin,poniatowa,swidnik,co,torun,simplesite,myspreadshop,gda,gdansk,gdynia,med,sopot,bielsko<ua>cc,inf,ltd,cx,biz,co,pp,v<to>611,oya,x0,quickconnect>direct<vpnplus,nett<com>a2hosted,cpserver,adobeaemcloud>dev>*<<africa,auiusercontent>*<aivencloud,alibabacloudcs,kasserver,amazonaws>af-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-northeast-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-northeast-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-northeast-3>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-south-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website<ap-southeast-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-southeast-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ap-southeast-3>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website<ap-southeast-4>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website<ap-southeast-5>execute-api,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-deprecated,s3-object-lambda,s3-website<ca-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<ca-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website<eu-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-central-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website<eu-north-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-south-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website<eu-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-deprecated,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-west-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<eu-west-3>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<il-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs<<me-central-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website<me-south-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<sa-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-deprecated,s3-fips,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-east-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-deprecated,s3-fips,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-gov-east-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website<us-gov-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website<us-west-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-object-lambda,s3-website,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<us-west-2>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,dualstack>s3,s3-accesspoint,s3-accesspoint-fips,s3-fips,s3-website<s3,s3-accesspoint,s3-accesspoint-fips,s3-deprecated,s3-fips,s3-object-lambda,s3-website,analytics-gateway,aws-cloud9>webview-assets<cloud9>vfs,webview-assets<<compute>*<compute-1>*<airflow>af-south-1>*<ap-east-1>*<ap-northeast-1>*<ap-northeast-2>*<ap-northeast-3>*<ap-south-1>*<ap-south-2>*<ap-southeast-1>*<ap-southeast-2>*<ap-southeast-3>*<ap-southeast-4>*<ap-southeast-5>*<ap-southeast-7>*<ca-central-1>*<ca-west-1>*<eu-central-1>*<eu-central-2>*<eu-north-1>*<eu-south-1>*<eu-south-2>*<eu-west-1>*<eu-west-2>*<eu-west-3>*<il-central-1>*<me-central-1>*<me-south-1>*<sa-east-1>*<us-east-1>*<us-east-2>*<us-west-1>*<us-west-2>*<<rds>af-south-1>*<ap-east-1>*<ap-east-2>*<ap-northeast-1>*<ap-northeast-2>*<ap-northeast-3>*<ap-south-1>*<ap-south-2>*<ap-southeast-1>*<ap-southeast-2>*<ap-southeast-3>*<ap-southeast-4>*<ap-southeast-5>*<ap-southeast-6>*<ap-southeast-7>*<ca-central-1>*<ca-west-1>*<eu-central-1>*<eu-central-2>*<eu-west-1>*<eu-west-2>*<eu-west-3>*<il-central-1>*<me-central-1>*<me-south-1>*<mx-central-1>*<sa-east-1>*<us-east-1>*<us-east-2>*<us-gov-east-1>*<us-gov-west-1>*<us-northeast-1>*<us-west-1>*<us-west-2>*<<s3,s3-1,s3-ap-east-1,s3-ap-northeast-1,s3-ap-northeast-2,s3-ap-northeast-3,s3-ap-south-1,s3-ap-southeast-1,s3-ap-southeast-2,s3-ca-central-1,s3-eu-central-1,s3-eu-north-1,s3-eu-west-1,s3-eu-west-2,s3-eu-west-3,s3-external-1,s3-fips-us-gov-east-1,s3-fips-us-gov-west-1,s3-global>accesspoint>mrap<<s3-me-south-1,s3-sa-east-1,s3-us-east-2,s3-us-gov-east-1,s3-us-gov-west-1,s3-us-west-1,s3-us-west-2,s3-website-ap-northeast-1,s3-website-ap-southeast-1,s3-website-ap-southeast-2,s3-website-eu-west-1,s3-website-sa-east-1,s3-website-us-east-1,s3-website-us-gov-west-1,s3-website-us-west-1,s3-website-us-west-2,elb>*<<amazoncognito>af-south-1>auth<ap-east-1>auth<ap-northeast-1>auth<ap-northeast-2>auth<ap-northeast-3>auth<ap-south-1>auth<ap-south-2>auth<ap-southeast-1>auth<ap-southeast-2>auth<ap-southeast-3>auth<ap-southeast-4>auth<ap-southeast-5>auth<ap-southeast-7>auth<ca-central-1>auth<ca-west-1>auth<eu-central-1>auth<eu-central-2>auth<eu-north-1>auth<eu-south-1>auth<eu-south-2>auth<eu-west-1>auth<eu-west-2>auth<eu-west-3>auth<il-central-1>auth<me-central-1>auth<me-south-1>auth<mx-central-1>auth<sa-east-1>auth<us-east-1>auth,auth-fips<us-east-2>auth,auth-fips<us-gov-east-1>auth-fips<us-gov-west-1>auth-fips<us-west-1>auth,auth-fips<us-west-2>auth,auth-fips<<amplifyapp,awsapprunner>*<awsapps,elasticbeanstalk>af-south-1,ap-east-1,ap-northeast-1,ap-northeast-2,ap-northeast-3,ap-south-1,ap-southeast-1,ap-southeast-2,ap-southeast-3,ap-southeast-5,ap-southeast-7,ca-central-1,eu-central-1,eu-north-1,eu-south-1,eu-south-2,eu-west-1,eu-west-2,eu-west-3,il-central-1,me-central-1,me-south-1,sa-east-1,us-east-1,us-east-2,us-gov-east-1,us-gov-west-1,us-west-1,us-west-2<awsglobalaccelerator,siiites,appspacehosted,appspaceusercontent,on-aptible,myasustor,balena-devices,boutir,bplaced,cafjs,canva-apps,canva-hosted-embed,canvacode,rice-labs,cdn77-storage,br,cn,de,eu,jpn,mex,ru,sa,uk,us,za,clever-cloud>services>*<<abrdns,dnsabr,ip-ddns,jdevcloud,wpdevcloud,cf-ipfs,cloudflare-ipfs,trycloudflare,co,devinapps>*<builtwithdark,datadetect>demo,instance<dattolocal,dattorelay,dattoweb,mydatto,digitaloceanspaces>*<discordsays,discordsez,drayddns,dreamhosters,durumis,blogdns,cechire,dnsalias,dnsdojo,doesntexist,dontexist,doomdns,dyn-o-saur,dynalias,dyndns-at-home,dyndns-at-work,dyndns-blog,dyndns-free,dyndns-home,dyndns-ip,dyndns-mail,dyndns-office,dyndns-pics,dyndns-remote,dyndns-server,dyndns-web,dyndns-wiki,dyndns-work,est-a-la-maison,est-a-la-masion,est-le-patron,est-mon-blogueur,from-ak,from-al,from-ar,from-ca,from-ct,from-dc,from-de,from-fl,from-ga,from-hi,from-ia,from-id,from-il,from-in,from-ks,from-ky,from-ma,from-md,from-mi,from-mn,from-mo,from-ms,from-mt,from-nc,from-nd,from-ne,from-nh,from-nj,from-nm,from-nv,from-oh,from-ok,from-or,from-pa,from-pr,from-ri,from-sc,from-sd,from-tn,from-tx,from-ut,from-va,from-vt,from-wa,from-wi,from-wv,from-wy,getmyip,gotdns,hobby-site,homelinux,homeunix,iamallama,is-a-anarchist,is-a-blogger,is-a-bookkeeper,is-a-bulls-fan,is-a-caterer,is-a-chef,is-a-conservative,is-a-cpa,is-a-cubicle-slave,is-a-democrat,is-a-designer,is-a-doctor,is-a-financialadvisor,is-a-geek,is-a-green,is-a-guru,is-a-hard-worker,is-a-hunter,is-a-landscaper,is-a-lawyer,is-a-liberal,is-a-libertarian,is-a-llama,is-a-musician,is-a-nascarfan,is-a-nurse,is-a-painter,is-a-personaltrainer,is-a-photographer,is-a-player,is-a-republican,is-a-rockstar,is-a-socialist,is-a-student,is-a-teacher,is-a-techie,is-a-therapist,is-an-accountant,is-an-actor,is-an-actress,is-an-anarchist,is-an-artist,is-an-engineer,is-an-entertainer,is-certified,is-gone,is-into-anime,is-into-cars,is-into-cartoons,is-into-games,is-leet,is-not-certified,is-slick,is-uberleet,is-with-theband,isa-geek,isa-hockeynut,issmarterthanyou,likes-pie,likescandy,neat-url,saves-the-whales,selfip,sells-for-less,sells-for-u,servebbs,simple-url,space-to-rent,teaches-yoga,writesthisblog,1cooldns,bumbleshrimp,ddnsfree,ddnsgeek,ddnsguru,dynuddns,dynuhosting,giize,gleeze,kozow,loseyourip,ooguy,pivohosting,theworkpc,wiredbladehosting,emergentagent>preview<mytuleap,tuleap-partners,encoreapi,evennode>eu-1,eu-2,eu-3,eu-4,us-1,us-2,us-3,us-4<onfabrica,fastly-edge,fastly-terrarium,fastvps-server,mydobiss,firebaseapp,fldrv,framercanvas,freebox-os,freeboxos,freemyip,aliases121,gentapps,gentlentapis,githubusercontent,0emm>*<appspot>r>*<<blogspot,codespot,googleapis,googlecode,pagespeedmobilizer,withgoogle,withyoutube,grayjayleagues,hatenablog,hatenadiary,hercules-app,hercules-dev,herokuapp,gr,smushcdn,wphostedmail,wpmucdn,pixolino,apps-1and1,live-website,webspace-host,dopaas,hosted-by-previder>paas<hosteur>rag-cloud,rag-cloud-ch<ik-server>jcloud,jcloud-ver-jpc<jelastic>demo<massivegrid>paas<wafaicloud>jed,ryd<eu1-plenit,la1-plenit,us1-plenit,webadorsite,on-forge,on-vapor,lpusercontent,linode>members,nodebalancer>*<<linodeobjects>*<linodeusercontent>ip<localtonet,lovableproject,barsycenter,barsyonline,lutrausercontent>*<magicpatternsapp,modelscape,mwcloudnonprod,polyspace,mazeplay,miniserver,atmeta,fbsbx>apps<meteorapp>eu<routingthecloud,same-app,same-preview,mydbserver,mochausercontent,hostedpi,mythic-beasts>caracal,customer,fentiger,lynx,ocelot,oncilla,onza,sphinx,vs,x,yali<nospamproxy>cloud>o365<<4u,nfshost,3utilities,blogsyte,ciscofreak,damnserver,ddnsking,ditchyourip,dnsiskinky,dynns,geekgalaxy,health-carereform,homesecuritymac,homesecuritypc,myactivedirectory,mysecuritycamera,myvnc,net-freaks,onthewifi,point2this,quicksytes,securitytactics,servebeer,servecounterstrike,serveexchange,serveftp,servegame,servehalflife,servehttp,servehumour,serveirc,servemp3,servep2p,servepics,servequake,servesarcasm,stufftoread,unusualperson,workisboring,myiphost,observableusercontent>static<simplesite,oaiusercontent>*<orsites,operaunite,customer-oci>*,oci>*<ocp>*<ocs>*<<oraclecloudapps>*<oraclegovcloudapps>*<authgear-staging,authgearapps,outsystemscloud,ownprovider,pgfog,pagexl,gotpantheon,paywhirl>*<forgeblocks,upsunapp,postman-echo,prgmr>xen<project-study>dev<pythonanywhere>eu<qa2,alpha-myqnapcloud,dev-myqnapcloud,mycloudnas,mynascloud,myqnapcloud,qualifioapp,ladesk,qualyhqpartner>*<qualyhqportal>*<qbuser,quipelements>*<rackmaze,readthedocs-hosted,rhcloud,onrender,render>app<subsc-pay,180r,dojin,sakuratan,sakuraweb,x0,code>builder>*<dev-builder>*<stg-builder>*<<salesforce>platform>code-builder-stg>test>001>*<<<<<logoip,scrysec,firewall-gateway,myshopblocks,myshopify,shopitsite,1kapp,appchizi,applinzi,sinaapp,vipsinaapp,streamlitapp,try-snowplow,playstation-cloud,myspreadshop,w-corp-staticblitz,w-credentialless-staticblitz,w-staticblitz,stackhero-network,stdlib>api<strapiapp>media<streak-link,streaklinks,streakusercontent,temp-dns,dsmynas,familyds,mytabit,taveusercontent,tb-hosting>site<reservd,thingdustdata,townnews-staging,typeform>pro<hk,it,deus-canvas,vultrobjects>*<wafflecell,hotelwithflight,reserve-online,cprapid,pleskns,remotewd,wiardweb>pages<drive-platform,base44-sandbox,wixsite,wixstudio,messwithdns,woltlab-demo,wpenginepowered>js<xnbay>u2,u2-local<xtooldevice,yolasite<io>on-acorn>*<myaddr,apigee,b-data,beagleboard,bitbucket,bluebite,boxfuse,brave>s>*<<browsersafetymark,bubble>cdn<bubbleapps,bigv>uk0<cleverapps,cloudbeesusercontent,dappnode>dyndns<darklang,definima,dedyn,icp0>raw>*<<icp1>raw>*<<qzz,fh-muenster,gitbook,github,gitlab,lolipop,hasura-app,hostyhosting,hypernode,moonscale>*<beebyte>paas<beebyteapp>sekd1<jele,keenetic,kiloapps,webthings,loginline,barsy,azurecontainer>*<ngrok>ap,au,eu,in,jp,sa,us<nodeart>stage<pantheonsite,forgerock>id<pstmn>mock<protonet,qcx>sys>*<<qoto,vaporcloud,myrdbx,rb-hosting>site<on-k3s>*<on-rio>*<readthedocs,resindevice,resinstaging>devices<hzc,sandcats,scrypted>client<mo-siemens,lair>apps<stolos>*<musician,utwente,edugit,telebit,thingdust>dev>cust,reservd<disrec>cust,reservd<prod>cust<testing>cust,reservd<<tickets,2038,webflow,webflowtest,drive-platform,editorx,wixstudio,basicserver,virtualserver<biz>activetrail,cloud-ip,cloudns,jozi,dyndns,for-better,for-more,for-some,for-the,selfip,webhop,orx,mmafan,myftp,no-ip,dscloud<app>adaptable,aiven,beget>*<brave>s>*<<clerk,clerkstage,cloudflare,wnext,csb>preview<convex,corespeed,deta,ondigitalocean,easypanel,encr>frontend<evervault>relay<expo>staging<edgecompute,on-fleek,flutterflow,sprites,e2b,framer,gadget,github,hosted>*<run>*,mtls>*<<web,hackclub,hasura,onhercules,botdash,shiptoday,leapcell,loginline,lovable,luyani,magicpatterns,medusajs,messerli,miren,mocha,netlify,ngrok,ngrok-free,developer>*<noop,northflank>*<upsun>*<railway>up<replit>id<nyat,snowflake>*,privatelink>*<<streamlit,spawnbase,telebit,typedream,vercel,wal,wasmer,bookonline,windsurf,base44,zeabur,zerops>*<<dev>myaddr,panel,bearblog,brave>s>*<<lcl>*<lclstage>*<stg>*<stgstage>*<pages,r2,workers,deno,deno-staging,deta,lp>api,objects<evervault>relay<fly,githubpreview,gateway>*<grebedoc,botdash,inbrowser>*<is-a-good,iserv,leapcell,runcontainers,localcert>user>*<<loginline,barsy,mediatech,mocha-sandbox,modx,ngrok,ngrok-free,is-a-fullstack,is-cool,is-not-a,localplayer,xmit,platter-app,replit>archer,bones,canary,global,hacker,id,janeway,kim,kira,kirk,odo,paris,picard,pike,prerelease,reed,riker,sisko,spock,staging,sulu,tarpit,teams,tucker,wesley,worf<crm>aa>*<ab>*<ac>*<ad>*<ae>*<af>*<ci>*<d>*<pa>*<pb>*<pc>*<pd>*<pe>*<pf>*<w>*<wa>*<wb>*<wc>*<wd>*<we>*<wf>*<<erp>web<vercel,webhare>*<hrsn,is-a<tools>addr>dyn<myaddr<live>aem,hlx,ewp>*<<net>adobeaemcloud,adobeio-static,adobeioruntime,akadns,akamai,akamai-staging,akamaiedge,akamaiedge-staging,akamaihd,akamaihd-staging,akamaiorigin,akamaiorigin-staging,akamaized,akamaized-staging,edgekey,edgekey-staging,edgesuite,edgesuite-staging,alwaysdata,myamaze,cloudfront,appudo,atlassian-dev>prod>cdn<<myfritz,shopselect,blackbaudcdn,boomla,bplaced,square7,cdn77>r<cdn77-ssl,gb,hu,jp,se,uk,clickrising,ddns-ip,dns-cloud,dns-dynamic,cloudaccess,cloudflare>cdn<cloudflareanycast>cdn<cloudflarecn>cdn<cloudflareglobal>cdn<ctfcloud,feste-ip,knx-server,static-access,cryptonomic>*<dattolocal,mydatto,debian,definima,deno>sandbox<icp>*<de5,at-band-camp,blogdns,broke-it,buyshouses,dnsalias,dnsdojo,does-it,dontexist,dynalias,dynathome,endofinternet,from-az,from-co,from-la,from-ny,gets-it,ham-radio-op,homeftp,homeip,homelinux,homeunix,in-the-band,is-a-chef,is-a-geek,isa-geek,kicks-ass,office-on-the,podzone,scrapper-site,selfip,sells-it,servebbs,serveftp,thruhere,webhop,casacam,dynu,dynuddns,mysynology,opik,spryt,dynv6,twmail,ru,channelsdvr>u<fastly>freetls,map,prod>a,global<ssl>a,b,global<<fastlylb>map<keyword-on,live-on,server-on,cdn-edges,heteml,cloudfunctions,grafana-dev,iobb,moonscale,in-dsl,in-vpn,oninferno,botdash,apps-1and1,ipifony,cloudjiffy>fra1-de,west1-us<elastx>jls-sto1,jls-sto2,jls-sto3<massivegrid>paas>fr-1,lon-1,lon-2,ny-1,ny-2,sg-1<<saveincloud>jelastic,nordeste-idc<scaleforce>j<kinghost,uni5,krellian,ggff,localto>*<barsy,luyani,memset,azure-api,azure-mobile,azureedge,azurefd,azurestaticapps>1,2,3,4,5,6,7,centralus,eastasia,eastus2,westeurope,westus2<azurewebsites,cloudapp,trafficmanager,usgovcloudapi>core>blob,file,web<servicebus<usgovcloudapp,usgovtrafficmanager,windows>core>blob,file,web<servicebus<mynetname>sn<routingthecloud,bounceme,ddns,eating-organic,mydissent,myeffect,mymediapc,mypsx,mysecuritycamera,nhlfan,no-ip,pgafan,privatizehealthinsurance,redirectme,serveblog,serveminecraft,sytes,dnsup,hicam,now-dns,ownip,vpndns,cloudycluster,ovh>hosting>*<webpaas>*<<rackmaze,myradweb,in,subsc-pay,squares,schokokeks,firewall-gateway,seidat,senseering,siteleaf,mafelo,myspreadshop,vps-host>jelastic>atl,njs,ric<<srcf>soc,user<supabase,dsmynas,familyds,ts>c>*<<torproject>pages<tunnelmole,vusercontent,reserve-online,localcert,community-pro,meinforum,yandexcloud>storage,website<za,zabc<network>aem,alces>*<appwrite,co,arvo,azimuth,tlon<page>aem,hlx,codeberg,deuxfleurs,mybox,heyflow,prvcy,rocky,statichost,pdns,plesk<reviews>aem<ca>barsy,awdev>*<co,no-ip,onid,myspreadshop,box<estate>compute>*<<org>altervista,pimienta,poivron,potager,sweetpepper,cdn77>c,rsc<cdn77-secure>origin>ssl<<ae,cloudns,ip-dynamic,ddnss,dpdns,duckdns,tunk,blogdns,blogsite,boldlygoingnowhere,dnsalias,dnsdojo,doesntexist,dontexist,doomdns,dvrdns,dynalias,dyndns>go,home<endofinternet,endoftheinternet,from-me,game-host,gotdns,hobby-site,homedns,homeftp,homelinux,homeunix,is-a-bruinsfan,is-a-candidate,is-a-celticsfan,is-a-chef,is-a-geek,is-a-knight,is-a-linux-user,is-a-patsfan,is-a-soxfan,is-found,is-lost,is-saved,is-very-bad,is-very-evil,is-very-good,is-very-nice,is-very-sweet,isa-geek,kicks-ass,misconfused,podzone,readmyblog,selfip,sellsyourhome,servebbs,serveftp,servegame,stuff-4-sale,webhop,accesscam,camdvr,freeddns,mywire,roxa,webredirect,twmail,eu>al,asso,at,au,be,bg,ca,cd,ch,cn,cy,cz,de,dk,edu,ee,es,fi,fr,gr,hr,hu,ie,il,in,int,is,it,jp,kr,lt,lu,lv,me,mk,mt,my,net,ng,nl,no,nz,pl,pt,ro,ru,se,si,sk,tr,uk,us<fedorainfracloud,fedorapeople,fedoraproject>cloud,os>app<stg>os>app<<<freedesktop,hatenadiary,hepforge,in-dsl,in-vpn,js,barsy,mayfirst,routingthecloud,bmoattachments,cable-modem,collegefan,couchpotatofries,hopto,mlbfan,myftp,mysecuritycamera,nflfan,no-ip,read-books,ufcfan,zapto,dynserv,now-dns,is-local,httpbin,pubtls,jpn,my-firewall,myfirewall,spdns,small-web,dsmynas,familyds,teckids>s3<tuxfamily,hk,us,toolforge,wmcloud>beta<wmflabs,za<cn>com>amazonaws>cn-north-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,rds>*<dualstack>s3,s3-accesspoint,s3-website<s3,s3-accesspoint,s3-deprecated,s3-object-lambda,s3-website<cn-northwest-1>execute-api,emrappui-prod,emrnotebooks-prod,emrstudio-prod,rds>*<dualstack>s3,s3-accesspoint<s3,s3-accesspoint,s3-object-lambda,s3-website<compute>*<airflow>cn-north-1>*<cn-northwest-1>*<<eb>cn-north-1,cn-northwest-1<elb>*<<amazonwebservices>on>cn-north-1>airflow>*<transfer-webapp<cn-northwest-1>airflow>*<transfer-webapp<<<sagemaker>cn-north-1>notebook,studio<cn-northwest-1>notebook,studio<<<canva-apps,canvasite>my<myqnapcloud,sh>as<quickconnect>direct<<eu>amazonwebservices>on>eusc-de-east-1>cognito-idp>auth<<<<cloudns,prvw,deuxfleurs,dogado>jelastic<barsy,spdns,nxa>*<directwp,transurl>*<<aws>on>af-south-1>airflow>*<lambda-url,transfer-webapp<ap-east-1>airflow>*<lambda-url,transfer-webapp<ap-northeast-1>airflow>*<lambda-url,transfer-webapp<ap-northeast-2>airflow>*<lambda-url,transfer-webapp<ap-northeast-3>airflow>*<lambda-url,transfer-webapp<ap-south-1>airflow>*<lambda-url,transfer-webapp<ap-south-2>airflow>*<transfer-webapp<ap-southeast-1>airflow>*<lambda-url,transfer-webapp<ap-southeast-2>airflow>*<lambda-url,transfer-webapp<ap-southeast-3>airflow>*<lambda-url,transfer-webapp<ap-southeast-4>airflow>*<transfer-webapp<ap-southeast-5>airflow>*<transfer-webapp<ca-central-1>airflow>*<lambda-url,transfer-webapp<ca-west-1>airflow>*<transfer-webapp<eu-central-1>airflow>*<lambda-url,transfer-webapp<eu-central-2>airflow>*<transfer-webapp<eu-north-1>airflow>*<lambda-url,transfer-webapp<eu-south-1>airflow>*<lambda-url,transfer-webapp<eu-south-2>airflow>*<transfer-webapp<eu-west-1>airflow>*<lambda-url,transfer-webapp<eu-west-2>airflow>*<lambda-url,transfer-webapp<eu-west-3>airflow>*<lambda-url,transfer-webapp<il-central-1>airflow>*<transfer-webapp<me-central-1>airflow>*<transfer-webapp<me-south-1>airflow>*<lambda-url,transfer-webapp<sa-east-1>airflow>*<lambda-url,transfer-webapp<us-east-1>airflow>*<lambda-url,transfer-webapp<us-east-2>airflow>*<lambda-url,transfer-webapp<us-west-1>airflow>*<lambda-url,transfer-webapp<us-west-2>airflow>*<lambda-url,transfer-webapp<ap-southeast-7>transfer-webapp<mx-central-1>transfer-webapp<us-gov-east-1>transfer-webapp,transfer-webapp-fips<us-gov-west-1>transfer-webapp,transfer-webapp-fips<<sagemaker>ap-northeast-1>labeling,notebook,studio<ap-northeast-2>labeling,notebook,studio<ap-south-1>labeling,notebook,studio<ap-southeast-1>labeling,notebook,studio<ap-southeast-2>labeling,notebook,studio<ca-central-1>labeling,notebook,notebook-fips,studio<eu-central-1>labeling,notebook,studio<eu-west-1>labeling,notebook,studio<eu-west-2>labeling,notebook,studio<us-east-1>labeling,notebook,notebook-fips,studio<us-east-2>labeling,notebook,notebook-fips,studio<us-west-2>labeling,notebook,notebook-fips,studio<af-south-1>notebook,studio<ap-east-1>notebook,studio<ap-northeast-3>notebook,studio<ap-south-2>notebook<ap-southeast-3>notebook,studio<ap-southeast-4>notebook<ca-west-1>notebook,notebook-fips<eu-central-2>notebook,studio<eu-north-1>notebook,studio<eu-south-1>notebook,studio<eu-south-2>notebook,studio<eu-west-3>notebook,studio<il-central-1>notebook,studio<me-central-1>notebook,studio<me-south-1>notebook,studio<sa-east-1>notebook,studio<us-gov-east-1>notebook,notebook-fips,studio,studio-fips<us-gov-west-1>notebook,notebook-fips,studio,studio-fips<us-west-1>notebook,notebook-fips,studio<experiments>*<<repost>private>*<<<online>eero,eero-stage,websitebuilder,leapcell,barsy<cloud>antagonist,begetcdn>*<convex>eu-west-1,us-east-1<elementor,emergent,encoway>eu<statics>*<ravendb,axarnet>es-1<diadem,jelastic>vip<jele,jenv-aruba>aruba>eur>it1<<it1<keliweb>cs<oxa>tn,uk<primetel>uk<reclaim>ca,uk,us<trendhosting>ch,de<jote,jotelulu,kuleuven,laravel,linkyard,magentosite>*<matlab,observablehq,perspecta,vapor,on-rancher>*<scw>baremetal>fr-par-1,fr-par-2,nl-ams-1<fr-par>cockpit,ddl,dtwh,fnc>functions<ifr,k8s>nodes<kafk,mgdb,rdb,s3,s3-website,scbl,whm<instances>priv,pub<k8s,nl-ams>cockpit,ddl,dtwh,ifr,k8s>nodes<kafk,mgdb,rdb,s3,s3-website,scbl,whm<pl-waw>cockpit,ddl,dtwh,ifr,k8s>nodes<kafk,mgdb,rdb,s3,s3-website,scbl<scalebook,smartlabeling<servebolt,onstackit>runs<trafficplex,unison-services,urown,voorloper,zap<apple>int>cloud>*,r>*,ap-north-1>*<ap-south-1>*<ap-south-2>*<eu-central-1>*<eu-north-1>*<us-central-1>*<us-central-2>*<us-east-1>*<us-east-2>*<us-west-1>*<us-west-2>*<us-west-3>*<<<<<global>appwrite<run>appwrite>*<canva,development,ravendb,liara>iran<lovable,needle,build>*<code>*<database>*<migration>*<onporter,repl,stackit,val>web<vercel,wix<si>f5,gitapp,gitpage<ir>arvanedge,vistablog<jp>ne>aseinet>user<gehirn,ivory,mail-box,mints,mokuren,opal,sakura,sumomo,topaz<buyshop,fashionstore,handcrafted,kawaiishop,supersale,theshop,0am,0g0,0j0,0t0,mydns,pgw,wjg,usercontent,angry,babyblue,babymilk,backdrop,bambina,bitter,blush,boo,boy,boyfriend,but,candypop,capoo,catfood,cheap,chicappa,chillout,chips,chowder,chu,ciao,cocotte,coolblog,cranky,cutegirl,daa,deca,deci,digick,egoism,fakefur,fem,flier,floppy,fool,frenchkiss,girlfriend,girly,gloomy,gonna,greater,hacca,heavy,her,hiho,hippy,holy,hungry,icurus,itigo,jellybean,kikirara,kill,kilo,kuron,littlestar,lolipopmc,lolitapunk,lomo,lovepop,lovesick,main,mods,mond,mongolian,moo,namaste,nikita,nobushi,noor,oops,parallel,parasite,pecori,peewee,penne,pepper,perma,pigboat,pinoko,punyu,pupu,pussycat,pya,raindrop,readymade,sadist,schoolbus,secret,staba,stripper,sub,sunnyday,thick,tonkotsu,under,upper,velvet,verse,versus,vivian,watson,weblike,whitesnow,zombie,hateblo,hatenablog,hatenadiary,2-d,bona,crap,daynight,eek,flop,halfmoon,jeez,matrix,mimoza,netgamers,nyanta,o0o0,rdy,rgr,rulez,sakurastorage>isk01>s3<isk02>s3<<saloon,sblo,skr,tank,uh-oh,undo,webaccel>rs,user<websozai,xii<vc>gv>d<0e>*<mydns<eus>party>user<<link>myfritz,cyon,joinmc,dweb>*<inbrowser>*<keenetic,nftstorage>ipfs<mypep,storacha>ipfs<w3s>ipfs<<ws>advisor>*<cloud66,dyndns,mypets<ec>base,official<shop>base,hoplix,barsy,barsyonline,shopware<gay>pages<la>bnr<je>of<site>square,canva>my<cloudera>*<convex>eu-west-1,us-east-1<cyon,caffeine,fastvps,figma,figma-gov,preview,heyflow,jele,jouwweb,loginline,barsy,co,notion,omniwe,opensocial,madethis,support,platformsh>*<tst>*<byen,sol,srht,novecore,cpanel,wpsquared,sourcecraft<ch>square7,cloudns,cloudscale>cust,lpg>objects<rma>objects<<objectstorage>lpg,rma<flow>ae>alp1<appengine<linkyard-cloud,gotdns,dnsking,123website,myspreadshop,firenet>*,svc>*<<12hp,2ix,4lima,lima-city<de>bplaced,square7,bwcloud-os-instance>*<com,cosidns>dyn<dnsupdater,dynamisches-dns,internet-dns,l-o-g-i-n,ddnss>dyn,dyndns<dyn-ip24,dyndns1,home-webserver>dyn<myhome-server,dnshome,fuettertdasnetz,isteingeek,istmein,lebtimnetz,leitungsen,traeumtgerade,frusky>*<goip,xn--gnstigbestellen-zvb,xn--gnstigliefern-wob,hs-heilbronn>it>pages,pages-research<<dyn-berlin,in-berlin,in-brb,in-butter,in-dsl,in-vpn,iservschule,mein-iserv,schuldock,schulplattform,schulserver,test-iserv,keymachine,co,git-repos,lcube-server,svn-repos,barsy,webspaceconfig,123webseite,rub,ruhr-uni-bochum>noc>io<<logoip,firewall-gateway,my-gateway,my-router,spdns,my,speedpartner>customer<myspreadshop,taifun-dns,12hp,2ix,4lima,lima-city,virtual-user,virtualuser,community-pro,diskussionsbereich,xenonconnect>*<<ba>brendly>shop<rs<hr>brendly>shop<<rs>brendly>shop<barsy,ox<am>radio<fm>radio,user>*<<uk>co>bytemark>dh,vm<layershift>j<barsy,barsyonline,retrosnub>cust<nh-serv,no-ip,adimo,myspreadshop<gov>api,campaign,service<conn,copro,hosp,independent-commission,independent-inquest,independent-inquiry,independent-panel,independent-review,public-inquiry,royal-commission,pymnt,org>glug,lug,lugs,affinitylottery,raffleentry,weeklylottery<barsy,nimsite,oraclegovcloudapps>*<<ac>drr,feedback,forms<ai>uwu,framer,kiloapps<co>carrd,crd,otap>*<hidns,leadpages,lpages,mypi,xmit>*<rdpa>clusters>*<srvrless>*<<firewalledreplit>id<repl>id<supabase>realtime,storage<umso<mp>ju<cz>contentproxy9>rsc<realm,e4,co,metacentrum>cloud>*<custom<muni>cloud>flt,usr<<<bz>za,mydns,gsj<se>com,iopsys,123minsida,itcouldbewor,myspreadshop<diy>discourse,imagine<group>discourse<team>discourse,jelastic<cc>cleverapps,cloud-ip,cloudns,ccwu,ftpaccess,game-server,myphotos,scrapping,twmail,csx,fantasyleague,spawn>instances<ec,eu,gu,uk,us<tech>cleverapps<asia>cloudns,daemon,dix<be>cloudns,webhosting,interhostsolutions>cloud<kuleuven>ezproxy<123website,myspreadshop,transurl>*<<cl>cloudns<club>cloudns,jele,barsy<cx>cloudns,ath,info,assessments,calculators,funnels,paynow,quizzes,researched,tests<in>cloudns,barsy,web,indevs,supabase<info>cloudns,dynamic-dns,barrel-of-knowledge,barrell-of-knowledge,dyndns,for-our,groks-the,groks-this,here-for-more,knowsitall,selfip,webhop,barsy,mayfirst,mittwald,mittwaldserver,typo3server,dvrcam,ilovecollege,no-ip,forumz,nsupdate,dnsupdate,v-info<nz>cloudns<ph>cloudns<pro>cloudns,keenetic,barsy,ngrok<pw>cloudns,x443<us>cloudns,is-by,land-4-sale,stuff-4-sale,heliohost,enscaled>phx<mircloud,azure-api,azurewebsites,ngo,golffan,noip,pointto,freeddns,srv>gh,gl<servername<me>c66,craft,edgestack,mybox,filegear,filegear-sg,lohmus,barsy,mcdir,brasilia,ddns,dnsfor,hopto,loginto,noip,webhop,soundcast,tcp4,vp4,diskstation,dscloud,i234,myds,synology,transip>site<nohost<host>cloudaccess,freesite,easypanel,emergent,fastvps,myfast,gadget,tempurl,wpmudev,iserv,jele,mircloud,bolt,wp2,half<gdn>cnpy<nl>co,hosting-cluster,gov,khplay,123website,myspreadshop,transurl>*<cistron,demon<no>co,123hjemmeside,myspreadshop<ru>ac,edu,gov,int,mil,eurodir,adygeya,bashkiria,bir,cbg,com,dagestan,grozny,kalmykia,kustanai,marine,mordovia,msk,mytis,nalchik,nov,pyatigorsk,spb,vladikavkaz,vladimir,na4u,mircloud,myjino>hosting>*<landing>*<spectrum>*<vps>*<<cldmail>hb<mcdir>vps<mcpre,net,org,pp,ras<email>crisp>on<intouch,tawk>p<tawkto>p<<dk>biz,co,firm,reg,store,123hjemmeside,myspreadshop<gg>ply>at>*<d6<botdash,kaas,stackit,panel>daemon<<plus>playit>at>*<with<<xyz>caffeine,botdash,telebit>*<<company>mybox<kg>us,xx,ae<cd>cc<ci>us<th>online,shop<scot>co,me,org,gov>service<<fi>dy,xn--hkkinen-5wa,iki,cloudplatform>fi<datacenter>demo,paas<kapsi,123kotisivu,myspreadshop<name>her>forgot<his>forgot<ispmanager,keenetic<nu>merseine,mine,shacknet,enterprisecloud<tv>better-than,dyndns,on-the-web,worse-than,from,sakura<rocks>myddns,stackit,lima-city,webspace<tw>com>mymailer<url,mydns<camp>emf>at<<ht>rt<cool>elementor,de<su>abkhazia,adygeya,aktyubinsk,arkhangelsk,armenia,ashgabad,azerbaijan,balashov,bashkiria,bryansk,bukhara,chimkent,dagestan,east-kazakhstan,exnet,georgia,grozny,ivanovo,jambyl,kalmykia,kaluga,karacol,karaganda,karelia,khakassia,krasnodar,kurgan,kustanai,lenug,mangyshlak,mordovia,msk,murmansk,nalchik,navoi,north-kazakhstan,nov,obninsk,penza,pokrovsk,sochi,spb,tashkent,termez,togliatti,troitsk,tselinograd,tula,tuva,vladikavkaz,vladimir,vologda<space>myfast,heiyu,hf>static<app-ionos,project,uber,xs4all<media>framer<photos>framer<website>framer<wiki>framer<fr>fbx-os,fbxos,freebox-os,freeboxos,goupile,kdns,123siteweb,on-web,chirurgiens-dentistes-en-france,dedibox,aeroport,avocat,chambagri,chirurgiens-dentistes,experts-comptables,medecin,notaires,pharmacien,port,veterinaire,myspreadshop,ynh<at>funkfeuer>wien<futurecms>*,ex>*<in>*<<futurehosting,futuremailing,ortsinfo>ex>*<kunden>*<<biz,info,123webseite,priv,4,my,myspreadshop,12hp,2ix,4lima,lima-city<community>nog,ravendb,myforum<ro>co,shop,barsy<design>graphic,bss<goog>cloud,translate,usercontent>*<<digital>cloudapps>london<<uy>gv<sh>hashbang,botda,lovable,platform>ent,eu,us<teleport,now<st>helioho,cn>*<kirara,noho<vip>hidns<one>kin>*<service,website<pub>id>*<kin>*<barsy<ng>biz>co,dl,go,lg,on<col,firm,gen,ltd,ngo,plc<it>ibxos,iliadboxos,neen>jc<123homepage,16-b,32-b,64-b,myspreadshop,syncloud<work>imagine-proxy<br>leg>ac,al,am,ap,ba,ce,df,es,go,ma,mg,ms,mt,pa,pb,pe,pi,pr,rj,rn,ro,rr,rs,sc,se,sp,to<com>simplesite<tche<md>ir<au>com>cloudlets>mel<myspreadshop<hrsn>vps<<cy>com>scaleforce>j<<<kz>jcloud<sg>enscaled<tn>orangecloud<zone>triton>*<stackit,lima<systems>knightpoint,miren<events>koobin,co<build>shiptoday,v0,windsurf<direct>libp2p<business>co<education>co<financial>co<place>co<technology>co<bs>we<services>loginline<bg>barsy<gr>barsy,simplesite<menu>barsy,barsyonline<mobi>barsy,dscloud<store>barsy,sellfy,shopware,storebase<support>barsy<by>mediatech<health>hra<casa>nabu>ui<<re>netlib,can<pizza>ngrok<news>noticeable<top>ntdll,wadl>*<<ovh>nerdpol<lol>omg<es>123miweb,myspreadshop<lu>123website<pt>123paginaweb<hosting>opencraft<orange>tech<pm>own,name<codes>owo>*<<lc>oy<games>pley,sheezy<bn>co<today>prequalifyme<kr>c01,eliv-api,eliv-cdn,eliv-dns,mmv,vki<id>e,zone<mn>nyc<builders>cloudsite<il>co>ravpage,mytabit,tabitorder<<basketball>aus,nz<edu>rit>git-pages<<xn--p1acf>xn--90amc,xn--j1aef,xn--j1ael8b,xn--h1ahn,xn--j1adp,xn--c1avg,xn--80aaa0cvac,xn--h1aliz,xn--90a1af,xn--41a<case>sav<ms>minisite<gw>nx<ie>myspreadshop<so>surveys<farm>storj<pictures>1337<rip>clan<hk>inc,ltd<ag>obj<tf>sch<wf>biz,sch<yt>org<academy>official";
+
+// node_modules/parse-domain/dist/trie/characters.js
+var UP = "<";
+var SAME = ",";
+var DOWN = ">";
+var RESET = "|";
+var WILDCARD = "*";
+var EXCEPTION = "!";
+
+// node_modules/parse-domain/dist/trie/look-up.js
+var lookUpTldsInTrie = (labels, trie) => {
+  const labelsToCheck = [...labels];
+  const tlds = [];
+  let node = trie;
+  while (labelsToCheck.length > 0) {
+    const label = labelsToCheck.pop();
+    const labelLowerCase = label.toLowerCase();
+    if (node.children.has(WILDCARD)) {
+      if (node.children.has(EXCEPTION + labelLowerCase)) {
+        break;
+      }
+      node = node.children.get(WILDCARD);
+    } else {
+      if (node.children.has(labelLowerCase) === false) {
+        break;
+      }
+      node = node.children.get(labelLowerCase);
+    }
+    tlds.unshift(label);
+  }
+  return tlds;
+};
+
+// node_modules/parse-domain/dist/trie/nodes.js
 var NODE_TYPE_ROOT = /* @__PURE__ */ Symbol("ROOT");
 var NODE_TYPE_CHILD = /* @__PURE__ */ Symbol("CHILD");
 var createRootNode = () => {
@@ -33242,7 +34126,7 @@ var createOrGetChild = (parent, label) => {
   return child;
 };
 
-// node_modules/parse-domain/build/trie/parse-trie.js
+// node_modules/parse-domain/dist/trie/parse-trie.js
 var parseTrie = (serializedTrie) => {
   const rootNode = createRootNode();
   let domain2 = "";
@@ -33286,7 +34170,7 @@ var parseTrie = (serializedTrie) => {
   return rootNode;
 };
 
-// node_modules/parse-domain/build/parse-domain.js
+// node_modules/parse-domain/dist/parse-domain.js
 var RESERVED_TOP_LEVEL_DOMAINS = [
   "localhost",
   "local",
@@ -33331,15 +34215,16 @@ var parseDomain = (hostname3, options2) => {
     };
   }
   const { labels, domain: domain2 } = sanitizationResult;
-  if (hostname3 === "" || RESERVED_TOP_LEVEL_DOMAINS.includes(labels[labels.length - 1])) {
+  const lastLabel = labels[labels.length - 1];
+  if (hostname3 === "" || lastLabel !== void 0 && RESERVED_TOP_LEVEL_DOMAINS.includes(lastLabel)) {
     return {
       type: ParseResultType.Reserved,
       hostname: domain2,
       labels
     };
   }
-  parsedIcannTrie = parsedIcannTrie !== null && parsedIcannTrie !== void 0 ? parsedIcannTrie : parseTrie(icann_default);
-  parsedPrivateTrie = parsedPrivateTrie !== null && parsedPrivateTrie !== void 0 ? parsedPrivateTrie : parseTrie(private_default);
+  parsedIcannTrie = parsedIcannTrie ?? parseTrie(icann_default);
+  parsedPrivateTrie = parsedPrivateTrie ?? parseTrie(private_default);
   const icannTlds = lookUpTldsInTrie(labels, parsedIcannTrie);
   const privateTlds = lookUpTldsInTrie(labels, parsedPrivateTrie);
   if (icannTlds.length === 0 && privateTlds.length === 0) {
@@ -33351,34 +34236,21 @@ var parseDomain = (hostname3, options2) => {
   }
   const indexOfPublicSuffixDomain = labels.length - Math.max(privateTlds.length, icannTlds.length) - 1;
   const indexOfIcannDomain = labels.length - icannTlds.length - 1;
-  return Object.assign({ type: ParseResultType.Listed, hostname: domain2, labels, icann: splitLabelsIntoDomains(labels, indexOfIcannDomain) }, splitLabelsIntoDomains(labels, indexOfPublicSuffixDomain));
-};
-
-// node_modules/parse-domain/build/from-url.js
-var urlPattern = /^[a-z][*+.a-z-]+:\/\//i;
-var invalidIpv6Pattern = /^([a-z][*+.a-z-]+:\/\/)([^[][^/?]*:[^/?]*:[^/?]*)(.*)/i;
-var NO_HOSTNAME = /* @__PURE__ */ Symbol("NO_HOSTNAME");
-var fromUrl = (urlLike) => {
-  if (typeof URL !== "function") {
-    throw new Error("Looks like the new URL() constructor is not globally available in your environment. Please make sure to use a polyfill.");
-  }
-  if (typeof urlLike !== "string") {
-    return NO_HOSTNAME;
-  }
-  let url2 = urlLike.startsWith("//") ? `http:${urlLike}` : (
-    // URLs that start with / do not have a hostname section
-    urlLike.startsWith("/") ? urlLike : urlPattern.test(urlLike) ? urlLike : `http://${urlLike}`
-  );
-  url2 = url2.replace(invalidIpv6Pattern, "$1[$2]$3");
-  try {
-    return new URL(url2).hostname;
-  } catch (_a2) {
-    return NO_HOSTNAME;
-  }
+  return {
+    type: ParseResultType.Listed,
+    hostname: domain2,
+    labels,
+    icann: splitLabelsIntoDomains(labels, indexOfIcannDomain),
+    ...splitLabelsIntoDomains(labels, indexOfPublicSuffixDomain)
+  };
 };
 
 // src/parse-domain.ts
 var parseHostname = (hostname3) => parseDomain(fromUrl(hostname3));
+var isValidHostname = async (maybeHostname) => {
+  const parseResult = parseHostname(maybeHostname);
+  return parseResult.type === ParseResultType.Listed && parseResult.domain;
+};
 var getDomainMetadata = (thing) => {
   const parseResult = parseHostname(thing);
   if (parseResult.type === ParseResultType.Listed) {
@@ -33393,6 +34265,167 @@ var getRootDomain = (hostname3) => {
   }
   return listed.domain + "." + listed.topLevelDomains.join(".");
 };
+
+// src/schema.ts
+var OptionalBooleanSchema = external_exports.union([external_exports.string(), external_exports.boolean(), external_exports.undefined()]).transform((val) => {
+  if (val === void 0) {
+    return val;
+  }
+  if (val === "true" || val === true) {
+    return true;
+  } else if (val === "false" || val === false) {
+    return false;
+  }
+  throw new Error("Invalid value");
+});
+var CloudflareAccountIdSchema = external_exports.string().refine((val) => /^[a-f0-9]{32}$/.test(val), {
+  message: "cloudflareAccountId must be a 32 character hexadecimal string (lowercase a-f, 0-9). You can find this in your Cloudflare dashboard url: dash.cloudflare.com/<cloudflareAccountId>",
+  path: ["cloudflareAccountId"]
+});
+var ApiTokenSchema = external_exports.string().min(1, { message: "appwardenApiToken is required" }).min(16, {
+  message: "appwardenApiToken appears to be invalid (too short). Please check your API token."
+});
+var HostnamesSchema = external_exports.union([external_exports.string(), external_exports.undefined()]).transform((val) => {
+  if (val === void 0 || val.trim() === "") {
+    return void 0;
+  }
+  return val.split(",").map((h) => h.trim()).filter((h) => h.length > 0);
+}).refine(
+  async (hostnames) => {
+    if (hostnames === void 0) {
+      return true;
+    }
+    const results = await Promise.all(
+      hostnames.map((h) => isValidHostname(h))
+    );
+    return results.every((r) => Boolean(r));
+  },
+  {
+    message: "All hostnames must be valid domain names. (e.g. `app.example.com,staging.example.com`)"
+  }
+);
+var ConfigSchema = external_exports.object({
+  cloudflareAccountId: CloudflareAccountIdSchema,
+  appwardenApiToken: ApiTokenSchema,
+  debug: OptionalBooleanSchema.default(false),
+  hostnames: HostnamesSchema.optional()
+});
+
+// src/cloudflare-nameservers.ts
+var import_dns = require("dns");
+var CLOUDFLARE_NS_PATTERNS = [
+  /^[a-z0-9-]+\.ns\.cloudflare\.com$/i,
+  /^ns[0-9]+\.cloudflare\.com$/i
+];
+function isCloudflareNameserver(nameserver) {
+  const normalized = nameserver.toLowerCase().trim();
+  return CLOUDFLARE_NS_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+async function hasCloudflareNameservers(hostname3) {
+  try {
+    const rootDomain = extractRootDomain(hostname3);
+    const nameservers = await import_dns.promises.resolveNs(rootDomain);
+    return nameservers.some((ns) => isCloudflareNameserver(ns));
+  } catch (error52) {
+    return false;
+  }
+}
+function extractRootDomain(hostname3) {
+  const parts = hostname3.toLowerCase().trim().split(".");
+  if (parts.length <= 2) {
+    return hostname3;
+  }
+  return parts.slice(-2).join(".");
+}
+async function filterCloudflareHostnames(hostnames) {
+  const results = await Promise.all(
+    hostnames.map(async (hostname3) => ({
+      hostname: hostname3,
+      isCloudflare: await hasCloudflareNameservers(hostname3)
+    }))
+  );
+  return results.filter((result) => result.isCloudflare).map((r) => r.hostname);
+}
+
+// src/templates/app.ts
+var appTemplate = `
+import {
+  useContentSecurityPolicy,
+  createAppwardenMiddleware,
+} from "@appwarden/middleware/cloudflare"
+import { config } from './generated-config.mjs'
+
+export default {
+  fetch: createAppwardenMiddleware((context) => ({
+    debug: context.env.DEBUG,
+    appwardenApiToken: context.env.APPWARDEN_API_TOKEN,
+    appwardenApiHostname: context.env.APPWARDEN_API_HOSTNAME,
+    multidomainConfig: config,
+  })),
+}
+`;
+
+// src/templates/generated-config.ts
+var extractHostnamesFromConfig = (config2) => {
+  return Object.keys(config2);
+};
+var hydrateGeneratedConfig = (middlewareOptionsMap) => {
+  const config2 = {};
+  let debug3 = false;
+  for (const [, options2] of middlewareOptionsMap) {
+    if (options2?.debug) {
+      const debugValue = typeof options2.debug === "string" ? options2.debug.toLowerCase() === "true" : options2.debug;
+      if (debugValue) {
+        debug3 = true;
+        break;
+      }
+    }
+  }
+  for (const [hostname3, options2] of middlewareOptionsMap) {
+    const hostnameConfig = {};
+    if (options2?.["lock-page-slug"]) {
+      hostnameConfig.lockPageSlug = options2["lock-page-slug"];
+    }
+    if (options2?.debug !== void 0) {
+      const debugValue = typeof options2.debug === "string" ? options2.debug.toLowerCase() === "true" : options2.debug;
+      hostnameConfig.debug = debugValue;
+    }
+    if (options2?.["csp-mode"] || options2?.["csp-directives"]) {
+      hostnameConfig.contentSecurityPolicy = {};
+      if (options2?.["csp-mode"]) {
+        hostnameConfig.contentSecurityPolicy.mode = options2["csp-mode"];
+      }
+      if (options2?.["csp-directives"]) {
+        hostnameConfig.contentSecurityPolicy.directives = options2["csp-directives"];
+      }
+    }
+    if (Object.keys(hostnameConfig).length > 0) {
+      config2[hostname3] = hostnameConfig;
+    }
+  }
+  const hostnames = extractHostnamesFromConfig(config2);
+  const configString = `// This file is auto-generated by @appwarden/build-cloudflare-action
+// Do not edit manually
+
+export const config = ${JSON.stringify(config2, null, 2)}
+`;
+  return { configString, hostnames, debug: debug3 };
+};
+
+// src/templates/package-json.ts
+var hydratePackageJson = (template, data) => template.replaceAll("{{VERSION}}", data.version);
+var packageJsonTemplate = `
+{
+  "name": "@appwarden/compiled-middleware",
+  "version": "{{VERSION}}",
+  "type": "module",
+  "author": "support@appwarden.io",
+  "license": "MIT",
+  "dependencies": {
+    "@appwarden/middleware": "{{VERSION}}"
+  }
+}
+`;
 
 // src/templates/wrangler-toml.ts
 var generateRoutes = (hostnames, env) => hostnames.map(
@@ -33443,30 +34476,28 @@ var isWellFormedToken = (token) => {
 var getMiddlewareOptions = async (apiToken, debug3 = () => {
 }) => {
   const url2 = new URL(
-    `/v1/middleware-config`,
+    `/v1/appwarden/config`,
     // @ts-expect-error tsup config
     "https://api.appwarden.io"
   );
-  debug3(`[middleware-config] Request URL: ${url2.toString()}`);
+  debug3(`[config] Request URL: ${url2.toString()}`);
   debug3(
-    `[middleware-config] Token well-formed: ${isWellFormedToken(apiToken)} (length: ${apiToken?.length ?? 0})`
+    `[config] Token well-formed: ${isWellFormedToken(apiToken)} (length: ${apiToken?.length ?? 0})`
   );
   let res;
   try {
     res = await fetch(url2, {
       headers: { Authorization: apiToken }
     });
-  } catch (error49) {
-    const message = error49 instanceof Error ? error49.message : String(error49);
+  } catch (error52) {
+    const message = error52 instanceof Error ? error52.message : String(error52);
     throw new Error(`Failed to fetch middleware configuration: ${message}`);
   }
-  debug3(`[middleware-config] Response status: ${res.status}`);
+  debug3(`[config] Response status: ${res.status}`);
   if (res.status >= 400) {
     if (res.headers.get("content-type")?.includes("application/json")) {
       const result2 = await res.json();
-      debug3(
-        `[middleware-config] Error response body: ${JSON.stringify(result2, null, 2)}`
-      );
+      debug3(`[config] Error response body: ${JSON.stringify(result2, null, 2)}`);
       if (result2.error?.code) {
         throw new Error(result2.error.code);
       }
@@ -33477,7 +34508,7 @@ var getMiddlewareOptions = async (apiToken, debug3 = () => {
     throw new Error("BAD_AUTH");
   }
   const result = await res.json();
-  debug3(`[middleware-config] Response body: ${JSON.stringify(result, null, 2)}`);
+  debug3(`[config] Response body: ${JSON.stringify(result, null, 2)}`);
   const parsed = MiddlewareConfigResponseSchema.safeParse(result);
   if (!parsed.success) {
     const formattedError = JSON.stringify(parsed.error.format(), null, 2);
@@ -33494,7 +34525,7 @@ ${formattedError}`
 };
 
 // src/index.ts
-var middlewareVersion = "3.2.1";
+var middlewareVersion = "3.16.7";
 var Debug = (debug3) => (msg) => {
   if (debug3) {
     console.log(msg);
@@ -33513,7 +34544,7 @@ async function main() {
         "Repository not found. Did you forget to include `actions/checkout` in your workflow?"
       );
     }
-  } catch (error49) {
+  } catch (error52) {
     return setFailed(
       "Repository not found. Did you forget to include `actions/checkout` in your workflow?"
     );
@@ -33522,6 +34553,7 @@ async function main() {
   debug2(`[config] Validating configuration`);
   const maybeConfig = await ConfigSchema.safeParseAsync({
     debug: getInput("debug"),
+    hostnames: getInput("hostnames"),
     cloudflareAccountId: getInput("cloudflare-account-id"),
     appwardenApiToken: getInput("appwarden-api-token")
   });
@@ -33531,28 +34563,53 @@ async function main() {
   const config2 = maybeConfig.data;
   debug2(`[config] \u2705 Validation complete`);
   const middlewareDir = ".appwarden/generated-middleware";
-  debug2(`[middleware-config] Fetching middleware configuration`);
+  debug2(`[config] Fetching middleware configuration`);
   let middlewareOptionsMap;
   try {
     middlewareOptionsMap = await getMiddlewareOptions(
       config2.appwardenApiToken,
       debug2
     );
-  } catch (error49) {
-    if (error49 instanceof Error) {
+  } catch (error52) {
+    if (error52 instanceof Error) {
       return setFailed(
-        error49.message === "BAD_AUTH" ? "Invalid Appwarden API token" : error49.message === "no_domain_configurations" ? `No domain configurations found. Please add a [domain configuration file](https://appwarden.io/docs/guides/domain-configuration-management) and try again.` : error49.message
+        error52.message === "BAD_AUTH" ? "Invalid Appwarden API token" : error52.message === "no_domain_configurations" ? `No domain configurations found. Please add a [domain configuration file](https://appwarden.io/docs/guides/domain-configuration-management) and try again.` : error52.message
       );
     }
-    return setFailed(String(error49));
+    return setFailed(String(error52));
   }
   if (middlewareOptionsMap.size === 0) {
     return setFailed(
       `No Appwarden middleware configurations found. Please ensure you have configured at least one domain.`
     );
   }
+  if (config2.hostnames) {
+    debug2(`[config] Filtering configurations to requested hostnames`);
+    const filteredMap = /* @__PURE__ */ new Map();
+    const requestedHostnames = config2.hostnames;
+    const availableHostnames = Array.from(middlewareOptionsMap.keys());
+    for (const hostname3 of requestedHostnames) {
+      if (middlewareOptionsMap.has(hostname3)) {
+        filteredMap.set(hostname3, middlewareOptionsMap.get(hostname3));
+      }
+    }
+    const missingHostnames = requestedHostnames.filter(
+      (h) => !availableHostnames.includes(h)
+    );
+    if (missingHostnames.length > 0) {
+      warning(
+        `Ignoring ${missingHostnames.length} requested hostname(s) not found in your domain configuration: ${missingHostnames.join(", ")}`
+      );
+    }
+    if (filteredMap.size === 0) {
+      return setFailed(
+        `None of the requested hostnames were found in your Appwarden domain configuration: ${requestedHostnames.join(", ")}`
+      );
+    }
+    middlewareOptionsMap = filteredMap;
+  }
   debug2(
-    `[middleware-config] \u2705 Fetch complete for ${middlewareOptionsMap.size} hostname(s)
+    `[config] \u2705 Fetch complete for ${middlewareOptionsMap.size} hostname(s)
  ${JSON.stringify(
       Object.fromEntries(middlewareOptionsMap),
       null,
@@ -33560,8 +34617,26 @@ async function main() {
     )}`
   );
   debug2(`[generation] Generating middleware files`);
-  const { configString, hostnames } = hydrateGeneratedConfig(middlewareOptionsMap);
+  const {
+    configString,
+    hostnames,
+    debug: debugEnabled
+  } = hydrateGeneratedConfig(middlewareOptionsMap);
   debug2(`[generation] Extracted hostnames: ${hostnames.join(", ")}`);
+  const cloudflareHostnames = await filterCloudflareHostnames(hostnames);
+  if (cloudflareHostnames.length < hostnames.length) {
+    const filtered = hostnames.filter((h) => !cloudflareHostnames.includes(h));
+    warning(
+      `Ignoring ${filtered.length} non-Cloudflare domain(s) in your domain configuration: ${filtered.join(", ")}`
+    );
+  }
+  if (cloudflareHostnames.length === 0) {
+    return setFailed(
+      `No hostnames are using Cloudflare nameservers. Please ensure your domains are configured to use Cloudflare nameservers.`
+    );
+  }
+  debug2(`[generation] Cloudflare hostnames: ${cloudflareHostnames.join(", ")}`);
+  debug2(`[generation] Debug mode: ${debugEnabled}`);
   await (0, import_promises.mkdir)(middlewareDir, { recursive: true });
   const projectFiles = [
     [
@@ -33572,7 +34647,7 @@ async function main() {
       "wrangler.toml",
       hydrateWranglerTemplate(wranglerFileTemplate, {
         cloudflareAccountId: config2.cloudflareAccountId,
-        hostnames
+        hostnames: cloudflareHostnames
       })
     ],
     ["app.mjs", appTemplate],
@@ -33585,7 +34660,7 @@ async function main() {
   }
   debug2(`[generation] \u2705 Generation complete`);
   setOutput("middlewareVersion", middlewareVersion);
-  setOutput("hostnames", hostnames.join(", "));
+  setOutput("hostnames", cloudflareHostnames.join(", "));
 }
 main().catch((err) => {
   error(err);

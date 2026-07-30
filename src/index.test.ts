@@ -3,11 +3,13 @@ import { mkdir, readdir, writeFile } from "fs/promises"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { HostnameMiddlewareOptions } from "./templates/generated-config"
 import { getMiddlewareOptions } from "./utils"
+import { filterCloudflareHostnames } from "./cloudflare-nameservers"
 
 // Mock dependencies
 vi.mock("@actions/core")
 vi.mock("fs/promises")
 vi.mock("./utils")
+vi.mock("./cloudflare-nameservers")
 
 // Mock global constants that are injected by tsup
 vi.stubGlobal("MIDDLEWARE_VERSION", "1.0.0")
@@ -25,6 +27,7 @@ describe("index", () => {
     }
     const mockGetMiddlewareOptions = vi.mocked(getMiddlewareOptions)
 
+    const mockFilterCloudflareHostnames = vi.mocked(filterCloudflareHostnames)
     const mockConfig = {
       debug: false,
       cloudflareAccountId: "1234567890abcdef1234567890abcdef",
@@ -43,6 +46,36 @@ describe("index", () => {
         ],
       ],
     )
+
+    const multiHostnameMiddlewareOptionsMap = new Map<
+      string,
+      HostnameMiddlewareOptions
+    >([
+      [
+        "app.example.com",
+        {
+          "lock-page-slug": "/maintenance",
+          "csp-mode": "enforced",
+          "csp-directives": { "default-src": "'self'" },
+        },
+      ],
+      [
+        "staging.example.com",
+        {
+          "lock-page-slug": "/maintenance",
+          "csp-mode": "report-only",
+          "csp-directives": { "default-src": "'self'" },
+        },
+      ],
+      [
+        "api.example.com",
+        {
+          "lock-page-slug": "/maintenance",
+          "csp-mode": "disabled",
+          "csp-directives": { "default-src": "'self'" },
+        },
+      ],
+    ])
 
     beforeEach(() => {
       vi.resetAllMocks()
@@ -68,6 +101,11 @@ describe("index", () => {
 
       // Mock successful middleware options fetch - returns map of all hostnames
       mockGetMiddlewareOptions.mockResolvedValue(mockMiddlewareOptionsMap)
+
+      // Mock filterCloudflareHostnames to return all hostnames by default
+      mockFilterCloudflareHostnames.mockImplementation(
+        async (hostnames) => hostnames,
+      )
     })
 
     afterEach(() => {
@@ -305,6 +343,103 @@ describe("index", () => {
       expect(consoleSpy).not.toHaveBeenCalled()
 
       consoleSpy.mockRestore()
+    })
+
+    it("should filter to only requested hostnames when hostnames input is provided", async () => {
+      mockGetMiddlewareOptions.mockResolvedValue(
+        multiHostnameMiddlewareOptionsMap,
+      )
+      mockCore.getInput.mockImplementation((name: string) => {
+        switch (name) {
+          case "debug":
+            return "false"
+          case "hostnames":
+            return "app.example.com, staging.example.com"
+          case "cloudflare-account-id":
+            return mockConfig.cloudflareAccountId
+          case "appwarden-api-token":
+            return mockConfig.appwardenApiToken
+          default:
+            return ""
+        }
+      })
+
+      await main()
+
+      expect(mockCore.setFailed).not.toHaveBeenCalled()
+      expect(mockCore.setOutput).toHaveBeenCalledWith(
+        "hostnames",
+        "app.example.com, staging.example.com",
+      )
+      expect(mockFs.writeFile).toHaveBeenCalledWith(
+        ".appwarden/generated-middleware/generated-config.mjs",
+        expect.stringContaining("app.example.com"),
+      )
+      expect(mockFs.writeFile).toHaveBeenCalledWith(
+        ".appwarden/generated-middleware/generated-config.mjs",
+        expect.stringContaining("staging.example.com"),
+      )
+      expect(mockFs.writeFile).toHaveBeenCalledWith(
+        ".appwarden/generated-middleware/generated-config.mjs",
+        expect.not.stringContaining("api.example.com"),
+      )
+    })
+
+    it("should warn when a requested hostname is not in the domain configuration", async () => {
+      mockGetMiddlewareOptions.mockResolvedValue(
+        multiHostnameMiddlewareOptionsMap,
+      )
+      mockCore.getInput.mockImplementation((name: string) => {
+        switch (name) {
+          case "debug":
+            return "false"
+          case "hostnames":
+            return "app.example.com, missing.example.com"
+          case "cloudflare-account-id":
+            return mockConfig.cloudflareAccountId
+          case "appwarden-api-token":
+            return mockConfig.appwardenApiToken
+          default:
+            return ""
+        }
+      })
+
+      await main()
+
+      expect(mockCore.setFailed).not.toHaveBeenCalled()
+      expect(mockCore.warning).toHaveBeenCalledWith(
+        "Ignoring 1 requested hostname(s) not found in your domain configuration: missing.example.com",
+      )
+      expect(mockCore.setOutput).toHaveBeenCalledWith(
+        "hostnames",
+        "app.example.com",
+      )
+    })
+
+    it("should fail when none of the requested hostnames are found", async () => {
+      mockGetMiddlewareOptions.mockResolvedValue(
+        multiHostnameMiddlewareOptionsMap,
+      )
+      mockCore.getInput.mockImplementation((name: string) => {
+        switch (name) {
+          case "debug":
+            return "false"
+          case "hostnames":
+            return "missing.example.com, also-missing.example.com"
+          case "cloudflare-account-id":
+            return mockConfig.cloudflareAccountId
+          case "appwarden-api-token":
+            return mockConfig.appwardenApiToken
+          default:
+            return ""
+        }
+      })
+
+      await main()
+
+      expect(mockCore.setFailed).toHaveBeenCalledWith(
+        "None of the requested hostnames were found in your Appwarden domain configuration: missing.example.com, also-missing.example.com",
+      )
     })
   })
 })

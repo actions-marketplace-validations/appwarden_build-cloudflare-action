@@ -1,5 +1,53 @@
 # @appwarden/build-cloudflare-action
 
+## 1.9.0
+
+### Minor Changes
+
+- [#94](https://github.com/appwarden/build-cloudflare-action/pull/94) [`4acd40c`](https://github.com/appwarden/build-cloudflare-action/commit/4acd40c10868ed22016eabf008887249eebe3599) Thanks [@stevefrench39](https://github.com/stevefrench39)! - Add optional `hostnames` input to filter which configured domains are built. When provided, only the requested hostnames are included in the generated middleware. Hostnames not found in the domain configuration are skipped with a warning.
+
+## 1.8.1
+
+### Patch Changes
+
+- [#85](https://github.com/appwarden/build-cloudflare-action/pull/85) [`97268e3`](https://github.com/appwarden/build-cloudflare-action/commit/97268e30cef924b77505241d466561d8291ce8b7) Thanks [@stevefrench39](https://github.com/stevefrench39)! - Fix action name to comply with GitHub Marketplace naming requirements
+
+  The action name in `action.yml` previously contained `@` and `/` characters (`@appwarden/build-cloudflare-action`), which are not allowed by the GitHub Marketplace. This changes the name to a marketplace-friendly format so the action can be published.
+
+## 1.8.0
+
+### Minor Changes
+
+- [#79](https://github.com/appwarden/build-cloudflare-action/pull/79) [`eb40880`](https://github.com/appwarden/build-cloudflare-action/commit/eb408803225b80808ab8363b19ea14a81cee78c8) Thanks [@stevefrench39](https://github.com/stevefrench39)! - Update @appwarden/middleware to version 3.16.0
+
+## 1.7.0
+
+### Minor Changes
+
+- [#76](https://github.com/appwarden/build-cloudflare-action/pull/76) [`7ad6b69`](https://github.com/appwarden/build-cloudflare-action/commit/7ad6b69404f2063e94a8a7e0c343d975626d8a43) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update @appwarden/middleware to version 3.16.0
+
+- [`35a8eb8`](https://github.com/appwarden/build-cloudflare-action/commit/35a8eb8c72211299aebb8dbca4af7343e0705861) Thanks [@stevefrench39](https://github.com/stevefrench39)! - Filter non-cloudflare domains from configuration
+
+- [#37](https://github.com/appwarden/build-cloudflare-action/pull/37) [`16dd216`](https://github.com/appwarden/build-cloudflare-action/commit/16dd216b82b0c13742d29c930cf7c3c1f800e9e4) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update @appwarden/middleware to version 3.13.4
+
+## 1.6.0
+
+### Minor Changes
+
+- [#17](https://github.com/appwarden/build-cloudflare-action/pull/17) [`c5dc7c4`](https://github.com/appwarden/build-cloudflare-action/commit/c5dc7c4ba54731998e6445dd8cfd964075e6dfe4) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update @appwarden/middleware to version 3.11.2
+
+## 1.5.0
+
+### Minor Changes
+
+- [#15](https://github.com/appwarden/build-cloudflare-action/pull/15) [`84ab636`](https://github.com/appwarden/build-cloudflare-action/commit/84ab636a4b9fa24b0c44a3fe8aed9f4b8425fbde) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update @appwarden/middleware to version 3.11.1
+
+## 1.4.0
+
+### Minor Changes
+
+- [#13](https://github.com/appwarden/build-cloudflare-action/pull/13) [`d4f8b11`](https://github.com/appwarden/build-cloudflare-action/commit/d4f8b116499f0e32919674b6e44927bea169b1b6) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update @appwarden/middleware to version 3.11.0
+
 ## 1.3.0
 
 ### Minor Changes
